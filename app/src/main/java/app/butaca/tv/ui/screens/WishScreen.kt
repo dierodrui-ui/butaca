@@ -131,14 +131,18 @@ fun WishScreen() {
             item(key = "head", span = { GridItemSpan(maxLineSpan) }) {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     T("Te digo lo que ver", size = 30, weight = FontWeight.Bold)
-                    T("Dime con tus palabras lo que te apetece y lo busco por géneros, temas, época y estilo en TMDB, solo entre lo que tienes.", size = 14, color = C.Muted)
+                    T("Escribe o dicta con el micrófono del mando lo que te apetece y lo busco por géneros, temas, época y estilo en TMDB, solo entre lo que tienes.", size = 14, color = C.Muted)
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        ActionButton("Hablar", Ic.Mic, onClick = { listen() }, primary = true, height = 48.dp, modifier = Modifier.focusRequester(micFocus))
                         TvTextField(
-                            typed, { typed = it }, "…o escríbelo: «película de niños tranquila»",
-                            modifier = Modifier.width(520.dp), onSubmit = { ask(typed) },
+                            typed, { typed = it }, "Escribe o dicta con el micrófono del mando: «película de niños tranquila»",
+                            modifier = Modifier.width(620.dp).focusRequester(micFocus), onSubmit = { ask(typed) },
                         )
-                        ActionButton("Buscar", Ic.Search, onClick = { ask(typed) }, height = 48.dp)
+                        ActionButton("Buscar", Ic.Search, onClick = { ask(typed) }, primary = true, height = 48.dp)
+                        // Borrar la frase y empezar de nuevo
+                        if (typed.isNotEmpty() || phrase.isNotEmpty()) ActionButton("Borrar", Ic.Close, onClick = {
+                            typed = ""; phrase = ""; result = null
+                            try { micFocus.requestFocus() } catch (_: Exception) { }
+                        }, height = 48.dp)
                     }
                     T("PRUEBA CON", size = 11, weight = FontWeight.Bold, color = C.Faint, modifier = Modifier.padding(top = 4.dp))
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {

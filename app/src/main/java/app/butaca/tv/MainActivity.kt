@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.Density
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import app.butaca.tv.data.ContentRef
@@ -179,7 +180,13 @@ fun ProfileRoot() {
     }
 
     val marks by remember { ButacaApp.repo.marks() }.collectAsState(initial = app.butaca.tv.data.Marks())
-    CompositionLocalProvider(LocalNav provides appNav, LocalDensity provides tvDensity, app.butaca.tv.ui.components.LocalMarks provides marks) {
+    val taste by app.butaca.tv.data.Taste.model.collectAsState()
+    val rateAsk by app.butaca.tv.data.RatePrompt.request.collectAsState()
+    val route = nav.currentBackStackEntryAsState().value?.destination?.route
+    CompositionLocalProvider(
+        LocalNav provides appNav, LocalDensity provides tvDensity, app.butaca.tv.ui.components.LocalMarks provides marks,
+        app.butaca.tv.ui.components.LocalTaste provides taste,
+    ) {
         Box(Modifier.fillMaxSize().background(C.Bg)) {
             NavHost(navController = nav, startDestination = start) {
                 composable("main") {
@@ -210,6 +217,10 @@ fun ProfileRoot() {
                 QuickMenu(m, onOpen = { appNav.openRef(it) }, onDismiss = { menu = null })
             }
             app.butaca.tv.ui.screens.KidTimeWarning()
+            // Al terminar una película o serie: «¿Qué te ha parecido?» (cuando ya has salido del reproductor)
+            rateAsk?.let { ref ->
+                if (route != "player") app.butaca.tv.ui.components.RatingDialog(ref, onDismiss = { app.butaca.tv.data.RatePrompt.done() })
+            }
         }
     }
 }

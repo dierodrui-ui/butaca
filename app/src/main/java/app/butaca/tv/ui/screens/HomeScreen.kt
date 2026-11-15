@@ -129,24 +129,17 @@ fun HomeScreen(onGoFolders: () -> Unit) {
 
     val empty = novedades.isEmpty() && recentMovies.isEmpty() && recentSeries.isEmpty() && continueList.isEmpty()
 
-    Box(Modifier.fillMaxSize()) {
-        PivotScope(pivot = 58.dp, enabled = { !heroFocused }) {
+    // El destacado queda siempre fijo arriba; debajo se desplazan las filas
+    Column(Modifier.fillMaxSize()) {
+    if (novedades.isNotEmpty()) Hero(novedades, onFocus = { f -> heroFocused = f })
+    Box(Modifier.fillMaxWidth().weight(1f)) {
+        PivotScope(pivot = 30.dp) {
             LazyColumn(
                 Modifier.fillMaxSize(),
                 state = listState,
-                contentPadding = PaddingValues(bottom = 90.dp),
+                contentPadding = PaddingValues(top = 14.dp, bottom = 90.dp),
                 verticalArrangement = Arrangement.spacedBy(22.dp),
             ) {
-                if (novedades.isNotEmpty()) {
-                    item(key = "hero") {
-                        Hero(novedades, onFocus = { f ->
-                            heroFocused = f
-                            if (f) scope.launch { listState.animateScrollToItem(0) }
-                        })
-                    }
-                } else {
-                    item(key = "top") { Box(Modifier.height(16.dp)) }
-                }
                 if (empty) {
                     item(key = "empty") {
                         EmptyState(
@@ -291,8 +284,9 @@ fun HomeScreen(onGoFolders: () -> Unit) {
             }
         }
         if (listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 0) {
-            TopFade(Modifier.align(Alignment.TopCenter), height = 40.dp)
+            TopFade(Modifier.align(Alignment.TopCenter), height = 30.dp)
         }
+    }
     }
 }
 
@@ -400,7 +394,7 @@ private fun Hero(items: List<ItemEntity>, onFocus: (Boolean) -> Unit) {
     val extra = extras[item.key]
     val backdrop = extra?.backdrop ?: item.backdrop
 
-    Box(Modifier.fillMaxWidth().height(350.dp).background(C.Bg)) {
+    Box(Modifier.fillMaxWidth().height(330.dp).background(C.Bg)) {
         // Imagen a la derecha, fundida con el fondo; al cambiar, fundido cruzado lento y un zoom muy suave
         androidx.compose.animation.AnimatedContent(
             targetState = safeIndex,

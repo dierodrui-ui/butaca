@@ -2,6 +2,7 @@ package app.butaca.tv.ui.screens
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -166,10 +167,15 @@ private fun SecondaryActions(item: ItemEntity, onPicker: () -> Unit) {
             onClick = { scope.launch { repo.toggleFolder(favId, ref, inFav) } },
         )
     }
+    var rating by remember { mutableStateOf(false) }
     ActionButton(
         if (watched) "Vista" else "Marcar vista", Ic.Check,
-        onClick = { scope.launch { repo.markWatched(ref, !watched) } },
+        onClick = {
+            scope.launch { repo.markWatched(ref, !watched) }
+            if (!watched) rating = true   // y, ya que la has visto, ¿qué te pareció?
+        },
     )
+    if (rating) app.butaca.tv.ui.components.RatingDialog(ref, onDismiss = { rating = false })
 }
 
 /** Géneros, estudio y temas de TMDB. Al pulsar uno, todo lo que tienes de esa etiqueta. */
@@ -315,79 +321,76 @@ fun MovieScreen(key: String, onBack: () -> Unit) {
 
     val resumeMs = progress?.takeIf { !it.finished && it.positionMs > 60_000 }?.positionMs ?: 0L
 
-    var headerFocused by remember { mutableStateOf(true) }
-    val movieList = rememberLazyListState()
+    // La cabecera (imagen, logo, categorías y descripción) queda fija; debajo se desplaza el resto
+    var inList by remember { mutableStateOf(false) }
     Box(Modifier.fillMaxSize().background(C.Bg)) {
         Backdrop(info?.backdrop ?: current.backdrop, Modifier.fillMaxWidth().height(520.dp))
-        PivotScope(pivot = 80.dp, enabled = { !headerFocused }) {
-            LazyColumn(
-                Modifier.fillMaxSize(),
-                state = movieList,
-                contentPadding = PaddingValues(start = 48.dp, end = 48.dp, top = 30.dp, bottom = 60.dp),
-                verticalArrangement = Arrangement.spacedBy(18.dp),
-            ) {
-                item(key = "back") {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Icon(Ic.Back, null, tint = C.Muted, modifier = Modifier.size(16.dp))
-                        T("Atrás para volver", size = 13, color = C.Muted)
+        Column(Modifier.fillMaxSize().padding(start = 48.dp, end = 48.dp, top = 26.dp)) {
+            Row(Modifier.animateContentSize(), horizontalArrangement = Arrangement.spacedBy(28.dp)) {
+                Box(Modifier.width(if (inList) 112.dp else 180.dp).aspectRatio(2f / 3f).clip(RoundedCornerShape(12.dp))) {
+                    Artwork(info?.poster ?: current.icon, current.name, current.stableKey, Modifier.fillMaxSize(), titleSize = 20)
+                }
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                    val genreText = related?.genres?.takeIf { it.isNotEmpty() }?.joinToString(", ") ?: genre
+                    T(listOfNotNull("Película", genreText).joinToString(" · "), size = 13, color = C.TextSoft, maxLines = 1)
+                    val logo = related?.logo
+                    if (logo != null) AsyncImage(
+                        logo, current.name, contentScale = ContentScale.Fit, alignment = Alignment.CenterStart,
+                        modifier = Modifier.heightIn(max = if (inList) 56.dp else 84.dp).widthIn(max = 420.dp),
+                    ) else T(current.name, size = if (inList) 26 else 32, weight = FontWeight.Bold, maxLines = if (inList) 1 else 2, lineHeight = 36)
+                    val meta = listOfNotNull(
+                        current.year?.toString() ?: info?.releaseDate?.take(4),
+                        (related?.runtime?.let { durationText(it * 60L) } ?: durationText(info?.durationSecs ?: 0)),
+                        (related?.runtime ?: ((info?.durationSecs ?: 0) / 60).toInt().takeIf { it > 0 })?.let { endsAt(it) },
+                        ratingText(info?.rating ?: current.rating),
+                        certText(related?.cert ?: current.cert),
+                    ).joinToString(" · ")
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        app.butaca.tv.ui.components.MatchLabel(app.butaca.tv.ui.components.LocalTaste.current?.match(related?.genres?.joinToString(",") ?: current.genre, current.rating ?: info?.rating, related?.tmdbId ?: current.tmdbId))
+                        if (meta.isNotBlank()) T(meta, size = 14, color = C.Muted)
+                    }
+                    TagChips(related)
+                    val plot = info?.plot ?: current.plot
+                    if (!plot.isNullOrBlank()) T(plot, size = 14, color = C.TextSoft, maxLines = if (inList) 2 else 4, lineHeight = 20, modifier = Modifier.fillMaxWidth(0.92f))
+                    if (!inList) {
+                        info?.director?.let { T("Dirección: $it", size = 12, color = C.Muted, maxLines = 1) }
+                        info?.cast?.let { T("Reparto: $it", size = 12, color = C.Muted, maxLines = 1, modifier = Modifier.fillMaxWidth(0.9f)) }
+                    }
+                    FlowRow(
+                        Modifier.padding(top = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        ActionButton(
+                            if (resumeMs > 0) "Continuar · min ${resumeMs / 60000}" else "Reproducir", Ic.Play,
+                            onClick = { scope.launch { repo.playRequestFor(current, resumeMs)?.let { nav.play(it) } } },
+                            primary = true, modifier = Modifier.focusRequester(playFocus),
+                        )
+                        if (resumeMs > 0) {
+                            ActionButton("Desde el principio", Ic.Refresh, onClick = {
+                                scope.launch { repo.playRequestFor(current, 0)?.let { nav.play(it) } }
+                            })
+                        }
+                        related?.trailer?.let { k -> ActionButton("Tráiler", Ic.Film, onClick = { nav.openTrailer(k) }) }
+                        app.butaca.tv.ui.components.RateButton(current.toRef())
+                        SecondaryActions(current) { picker = true }
                     }
                 }
-                item(key = "header") {
-                    Row(
-                        Modifier.onFocusChanged {
-                            headerFocused = it.hasFocus
-                            if (it.hasFocus) scope.launch { movieList.animateScrollToItem(0) }
-                        },
-                        horizontalArrangement = Arrangement.spacedBy(32.dp),
-                    ) {
-                        Box(Modifier.width(200.dp).aspectRatio(2f / 3f).clip(RoundedCornerShape(12.dp))) {
-                            Artwork(info?.poster ?: current.icon, current.name, current.stableKey, Modifier.fillMaxSize(), titleSize = 20)
-                        }
-                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(11.dp)) {
-                            val genreText = related?.genres?.takeIf { it.isNotEmpty() }?.joinToString(", ") ?: genre
-                            T(listOfNotNull("Película", genreText).joinToString(" · "), size = 13, color = C.TextSoft, maxLines = 1)
-                            val logo = related?.logo
-                            if (logo != null) AsyncImage(
-                                logo, current.name, contentScale = ContentScale.Fit, alignment = Alignment.CenterStart,
-                                modifier = Modifier.heightIn(max = 90.dp).widthIn(max = 420.dp),
-                            ) else T(current.name, size = 32, weight = FontWeight.Bold, maxLines = 2, lineHeight = 36)
-                            val meta = listOfNotNull(
-                                current.year?.toString() ?: info?.releaseDate?.take(4),
-                                (related?.runtime?.let { durationText(it * 60L) } ?: durationText(info?.durationSecs ?: 0)),
-                                (related?.runtime ?: ((info?.durationSecs ?: 0) / 60).toInt().takeIf { it > 0 })?.let { endsAt(it) },
-                                ratingText(info?.rating ?: current.rating),
-                                certText(related?.cert ?: current.cert),
-                            ).joinToString(" · ")
-                            if (meta.isNotBlank()) T(meta, size = 14, color = C.Muted)
-                            TagChips(related)
-                            val plot = info?.plot ?: current.plot
-                            if (!plot.isNullOrBlank()) T(plot, size = 14, color = C.TextSoft, maxLines = 4, lineHeight = 20, modifier = Modifier.fillMaxWidth(0.9f))
-                            info?.director?.let { T("Dirección: $it", size = 12, color = C.Muted, maxLines = 1) }
-                            info?.cast?.let { T("Reparto: $it", size = 12, color = C.Muted, maxLines = 1, modifier = Modifier.fillMaxWidth(0.9f)) }
-                            FlowRow(
-                                Modifier.padding(top = 6.dp),
-                                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                verticalArrangement = Arrangement.spacedBy(10.dp),
-                            ) {
-                                ActionButton(
-                                    if (resumeMs > 0) "Continuar · min ${resumeMs / 60000}" else "Reproducir", Ic.Play,
-                                    onClick = { scope.launch { repo.playRequestFor(current, resumeMs)?.let { nav.play(it) } } },
-                                    primary = true, modifier = Modifier.focusRequester(playFocus),
-                                )
-                                if (resumeMs > 0) {
-                                    ActionButton("Desde el principio", Ic.Refresh, onClick = {
-                                        scope.launch { repo.playRequestFor(current, 0)?.let { nav.play(it) } }
-                                    })
-                                }
-                                related?.trailer?.let { k -> ActionButton("Tráiler", Ic.Film, onClick = { nav.openTrailer(k) }) }
-                                SecondaryActions(current) { picker = true }
-                            }
-                            Box(Modifier.padding(top = 6.dp)) { FolderChips(current.stableKey) }
+            }
+            PivotScope(pivot = 12.dp) {
+                LazyColumn(
+                    Modifier.weight(1f).fillMaxWidth().padding(top = 14.dp).onFocusChanged { inList = it.hasFocus },
+                    contentPadding = PaddingValues(bottom = 50.dp, top = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                ) {
+                    item(key = "chips") {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            FolderChips(current.stableKey)
                             PeopleChips(related?.people.orEmpty())
                         }
                     }
+                    relatedRows(related?.rows, similar)
                 }
-                relatedRows(related?.rows, similar)
             }
         }
     }
@@ -463,9 +466,9 @@ fun SeriesScreen(key: String, onBack: () -> Unit) {
                 val genreText = related?.genres?.takeIf { it.isNotEmpty() }?.joinToString(", ") ?: genre
                 T(listOfNotNull("Serie", genreText).joinToString(" · "), size = 13, color = C.TextSoft, maxLines = 1)
                 val logo = related?.logo
-                if (logo != null && !inList) AsyncImage(
+                if (logo != null) AsyncImage(
                     logo, current.name, contentScale = ContentScale.Fit, alignment = Alignment.CenterStart,
-                    modifier = Modifier.heightIn(max = 80.dp).widthIn(max = 400.dp),
+                    modifier = Modifier.heightIn(max = if (inList) 52.dp else 80.dp).widthIn(max = 400.dp),
                 ) else T(current.name, size = if (inList) 24 else 32, weight = FontWeight.Bold, maxLines = if (inList) 1 else 2, lineHeight = if (inList) 28 else 36)
                 val seasons = info?.seasons?.size ?: 0
                 val meta = listOfNotNull(
@@ -474,7 +477,10 @@ fun SeriesScreen(key: String, onBack: () -> Unit) {
                     ratingText(info?.rating ?: current.rating),
                     certText(related?.cert ?: current.cert),
                 ).joinToString(" · ")
-                if (meta.isNotBlank()) T(meta, size = 14, color = C.Muted)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    app.butaca.tv.ui.components.MatchLabel(app.butaca.tv.ui.components.LocalTaste.current?.match(related?.genres?.joinToString(",") ?: current.genre, current.rating ?: info?.rating, related?.tmdbId ?: current.tmdbId))
+                    if (meta.isNotBlank()) T(meta, size = 14, color = C.Muted)
+                }
                 // Estado de la serie según TMDB
                 related?.tv?.let { tv ->
                     val state = when (tv.status) {
@@ -489,12 +495,10 @@ fun SeriesScreen(key: String, onBack: () -> Unit) {
                     val line = listOfNotNull(state, next, missing).joinToString(" · ")
                     if (line.isNotBlank()) T(line.replaceFirstChar { it.uppercase() }, size = 13, weight = FontWeight.SemiBold, color = if (missing != null) C.Accent else C.Green)
                 }
-                if (!inList) TagChips(related)
-                if (!inList) {
-                    val plot = info?.plot ?: current.plot
-                    if (!plot.isNullOrBlank()) T(plot, size = 14, color = C.TextSoft, maxLines = 3, lineHeight = 20)
-                    info?.cast?.let { T("Reparto: $it", size = 12, color = C.Muted, maxLines = 1) }
-                }
+                TagChips(related)
+                val plot = info?.plot ?: current.plot
+                if (!plot.isNullOrBlank()) T(plot, size = 14, color = C.TextSoft, maxLines = if (inList) 2 else 3, lineHeight = 20)
+                if (!inList) info?.cast?.let { T("Reparto: $it", size = 12, color = C.Muted, maxLines = 1) }
             }
             FlowRow(
                 Modifier.padding(top = 14.dp),
@@ -509,6 +513,7 @@ fun SeriesScreen(key: String, onBack: () -> Unit) {
                 }
                 ActionButton(label, Ic.Play, onClick = { nextEp?.let { play(it, nextResume) } }, primary = true, modifier = Modifier.focusRequester(playFocus))
                 related?.trailer?.let { k -> ActionButton("Tráiler", Ic.Film, onClick = { nav.openTrailer(k) }) }
+                app.butaca.tv.ui.components.RateButton(current.toRef())
                 SecondaryActions(current) { picker = true }
             }
             if (!inList) Box(Modifier.padding(top = 12.dp)) { FolderChips(current.stableKey) }

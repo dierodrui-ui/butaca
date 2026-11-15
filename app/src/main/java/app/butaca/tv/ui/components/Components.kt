@@ -269,6 +269,10 @@ fun PosterCard(
                 ) { T("$position", size = 12, weight = FontWeight.SemiBold) }
             }
             if (isSeries) Badge("SERIE", Modifier.align(Alignment.TopEnd).padding(7.dp))
+            // «% para ti» según lo aprendido de tus gustos
+            LocalTaste.current?.match(keySeed)?.let { m ->
+                MatchPill(m, Modifier.align(if (position == null) Alignment.TopStart else Alignment.TopEnd).padding(7.dp))
+            }
             if (watched) {
                 Box(
                     Modifier.align(Alignment.BottomEnd).padding(7.dp).size(24.dp).clip(CircleShape).background(C.Green),

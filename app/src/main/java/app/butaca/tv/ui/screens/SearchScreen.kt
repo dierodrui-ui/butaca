@@ -37,6 +37,9 @@ import app.butaca.tv.data.searchExtras
 import app.butaca.tv.data.explorerGroups
 import androidx.compose.runtime.produceState
 import app.butaca.tv.ui.C
+import app.butaca.tv.ui.Ic
+import app.butaca.tv.ui.components.ActionButton
+import androidx.compose.ui.Alignment
 import app.butaca.tv.ui.components.EmptyState
 import app.butaca.tv.ui.components.MenuRequest
 import app.butaca.tv.ui.components.Pill
@@ -106,13 +109,17 @@ fun SearchScreen() {
             item(key = "field", span = { GridItemSpan(maxLineSpan) }) {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     T("Buscar", size = 26, weight = FontWeight.SemiBold)
-                    TvTextField(
-                        value = query, onValue = { query = it },
-                        hint = "Pulsa OK para escribir, o usa el micrófono del mando",
-                        modifier = Modifier.fillMaxWidth(0.7f).focusRequester(field),
-                        imeAction = ImeAction.Search,
-                        onSubmit = { focusManager.moveFocus(FocusDirection.Down) },
-                    )
+                    androidx.compose.foundation.layout.Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        TvTextField(
+                            value = query, onValue = { query = it },
+                            hint = "Pulsa OK para escribir, o usa el micrófono del mando",
+                            modifier = Modifier.fillMaxWidth(0.7f).focusRequester(field),
+                            imeAction = ImeAction.Search,
+                            onSubmit = { focusManager.moveFocus(FocusDirection.Down) },
+                        )
+                        // Borrar lo escrito de un golpe
+                        if (query.isNotEmpty()) ActionButton("Borrar", Ic.Close, onClick = { query = ""; try { field.requestFocus() } catch (_: Exception) { } })
+                    }
                     T("Títulos en español o inglés, personas («Tom Hanks», «Almodóvar») o temas («zombis», «navidad»). Pulsa ✓ o Atrás para cerrar el teclado.", size = 13, color = C.Muted)
                 }
             }

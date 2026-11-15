@@ -81,6 +81,40 @@ data class WatchLogEntity(
     val lastAt: Long,
 )
 
+/** Tu nota (1 a 10) de cada título: es lo que más pesa en el «% para ti». */
+@Entity(tableName = "taste")
+data class TasteEntity(
+    @PrimaryKey val stableKey: String,
+    val type: String,
+    val title: String,
+    val icon: String?,
+    val score: Int,          // 1..10
+    val genre: String?,      // géneros de TMDB en el momento de valorar
+    val tmdbId: Int?,
+    val at: Long,
+)
+
+@Dao
+interface TasteDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun set(t: TasteEntity)
+
+    @Query("DELETE FROM taste WHERE stableKey = :key")
+    suspend fun clear(key: String)
+
+    @Query("SELECT * FROM taste ORDER BY at DESC")
+    suspend fun all(): List<TasteEntity>
+
+    @Query("SELECT * FROM taste ORDER BY at DESC")
+    fun observeAll(): Flow<List<TasteEntity>>
+
+    @Query("SELECT score FROM taste WHERE stableKey = :key")
+    fun observe(key: String): Flow<Int?>
+
+    @Query("SELECT score FROM taste WHERE stableKey = :key")
+    suspend fun get(key: String): Int?
+}
+
 data class TitleTotal(val stableKey: String, val type: String, val title: String, val icon: String?, val total: Long, val lastAt: Long)
 
 @Dao
@@ -137,9 +171,9 @@ interface StatsDao {
 @Database(
     entities = [
         FolderEntity::class, FolderItemEntity::class, ProgressEntity::class, EpisodeProgressEntity::class,
-        TrackedSeriesEntity::class, UsageDayEntity::class, WatchLogEntity::class,
+        TrackedSeriesEntity::class, UsageDayEntity::class, WatchLogEntity::class, TasteEntity::class,
     ],
-    version = 1,
+    version = 2,
     exportSchema = false,
 )
 abstract class UserDb : RoomDatabase() {
@@ -147,12 +181,21 @@ abstract class UserDb : RoomDatabase() {
     abstract fun progress(): ProgressDao
     abstract fun tracked(): TrackedDao
     abstract fun stats(): StatsDao
+    abstract fun taste(): TasteDao
 
     companion object {
         fun fileName(profileId: Long) = "user_$profileId.db"
 
         fun open(context: Context, profileId: Long): UserDb =
             Room.databaseBuilder(context, UserDb::class.java, fileName(profileId))
+                .addMigrations(object : androidx.room.migration.Migration(1, 2) {
+                    override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                        db.execSQL(
+                            "CREATE TABLE IF NOT EXISTS `taste` (`stableKey` TEXT NOT NULL, `type` TEXT NOT NULL, `title` TEXT NOT NULL, " +
+                                "`icon` TEXT, `score` INTEGER NOT NULL, `genre` TEXT, `tmdbId` INTEGER, `at` INTEGER NOT NULL, PRIMARY KEY(`stableKey`))"
+                        )
+                    }
+                })
                 .fallbackToDestructiveMigrationOnDowngrade()
                 .build()
 

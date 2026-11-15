@@ -114,11 +114,12 @@ class Repo(
         _profile.value = p
         prefs.update { it.copy(lastProfile = p.id) }
         resetProfileCaches()
+        Taste.clear(); Taste.rebuild(this, 400)
         usageResume()
         if (p.kid) startKidsPrep()
     }
 
-    fun leaveProfile() { usagePause(); _profile.value = null }
+    fun leaveProfile() { usagePause(); Taste.clear(); _profile.value = null }
 
     suspend fun saveProfile(p: ProfileEntity): Long {
         val id = if (p.id == 0L) db.profiles().insert(p.copy(position = db.profiles().all().size, createdAt = System.currentTimeMillis()))
@@ -891,6 +892,7 @@ class Repo(
 
     suspend fun toggleFolder(folderId: Long, ref: ContentRef, inFolder: Boolean) {
         if (inFolder) removeFromFolder(folderId, ref.stableKey) else addToFolder(folderId, ref)
+        Taste.rebuild(this)
     }
 
     suspend fun toggleSystem(system: String, ref: ContentRef, inFolder: Boolean) =
@@ -953,7 +955,7 @@ class Repo(
         user.progress().upsert(
             ProgressEntity(item.stableKey, item.type, item.title, item.icon, positionMs, durationMs, System.currentTimeMillis(), finished)
         )
-        if (finished) onFinished(item.stableKey)
+        if (finished) onFinished(ContentRef(item.stableKey, item.type, item.title, item.icon, null, null, null))
     }
 
     suspend fun saveEpisodeProgress(
@@ -972,19 +974,20 @@ class Repo(
                 episodeId = epId, season = item.season, episode = item.episode, episodeTitle = item.subtitle,
             )
         )
-        if (seriesDone) onFinished(item.stableKey)
+        if (seriesDone) onFinished(ContentRef(item.stableKey, ContentType.SERIES, seriesTitle, seriesIcon, null, null, null))
     }
 
-    /** Al terminar: sale de «Ver más adelante» y pasa a «Vistas». */
-    private suspend fun onFinished(stableKey: String) {
-        val later = user.folders().systemFolder("later") ?: return
-        user.folders().removeItem(later.id, stableKey)
+    /** Al terminar: sale de «Ver más adelante», pasa a «Vistas» y te pregunta qué te ha parecido. */
+    private suspend fun onFinished(ref: ContentRef, askRating: Boolean = true) {
+        user.folders().systemFolder("later")?.let { user.folders().removeItem(it.id, ref.stableKey) }
+        if (askRating && user.taste().get(ref.stableKey) == null) RatePrompt.ask(ref)
+        Taste.rebuild(this)
     }
 
     suspend fun markWatched(ref: ContentRef, watched: Boolean) {
         if (watched) {
             user.progress().upsert(ProgressEntity(ref.stableKey, ref.type, ref.title, ref.icon, 1, 1, System.currentTimeMillis(), true))
-            onFinished(ref.stableKey)
+            onFinished(ref, askRating = false)   // desde la ficha se pregunta directamente
         } else {
             user.progress().delete(ref.stableKey)
             if (ref.isSeries) user.progress().clearEpisodes(ref.stableKey)

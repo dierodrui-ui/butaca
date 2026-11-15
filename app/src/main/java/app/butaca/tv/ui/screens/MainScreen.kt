@@ -137,9 +137,13 @@ private fun Rail(current: Tab, onSelect: (Tab) -> Unit) {
                 }
             }
         }
+        var dice by remember { mutableStateOf(false) }
         Tab.entries.filter { it != Tab.SETTINGS }.forEach { t ->
             MenuRow(t.label, t.icon(), onClick = { onSelect(t) }, selected = t == current, iconTint = if (t == current) C.Accent else C.Muted)
+            // El dado: una película que no hayas visto, elegida con tus gustos
+            if (t == Tab.WISH) MenuRow("Sorpréndeme", Ic.Dice, onClick = { dice = true }, iconTint = C.Accent)
         }
+        if (dice) DiceDialog(onDismiss = { dice = false })
         Spacer(Modifier.weight(1f))
         val exp = settings.expDate
         val statusText = when {

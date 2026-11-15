@@ -263,6 +263,9 @@ interface ItemDao {
         pop: Double?, country: String?, lang: String?,
     )
 
+    @Query("SELECT stableKey, type, genre, rating, tmdbId FROM item WHERE type IN ('movie','series') AND isAdult = 0 AND genre IS NOT NULL")
+    suspend fun matchIndex(): List<MatchRow>
+
     /** Películas o series ya identificadas en TMDB (para las filas por categorías). */
     @Query("SELECT * FROM item WHERE type = :type AND isAdult = 0 AND tmdbId IS NOT NULL")
     suspend fun identified(type: String): List<ItemEntity>
@@ -318,6 +321,9 @@ interface ItemDao {
 data class KeyAdded(val key: String, val added: Long)
 
 data class KeyMark(val stableKey: String, val system: String)
+
+/** Lo justo de cada título para calcular el «% para ti». */
+data class MatchRow(val stableKey: String, val type: String, val genre: String?, val rating: Double?, val tmdbId: Int?)
 
 @Dao
 interface FolderDao {
