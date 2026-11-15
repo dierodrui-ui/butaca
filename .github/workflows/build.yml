@@ -25,7 +25,7 @@ jobs:
 
       - name: Compilar
         env:
-          TMDB_KEY: ${{ secrets.TMDB_KEY }}
+          TMDB_KEY: ${{ secrets.TMDB_KEY || vars.TMDB_KEY }}
         run: gradle assembleRelease --no-daemon --stacktrace
 
       - name: Preparar APK

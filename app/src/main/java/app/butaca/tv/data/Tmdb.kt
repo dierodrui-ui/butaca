@@ -35,6 +35,29 @@ class TmdbClient(
 
     val enabled: Boolean get() = keyProvider().isNotBlank()
 
+    /** Último problema al hablar con TMDB (para mostrarlo en Ajustes). */
+    @Volatile var lastError: String? = null
+
+    /** Comprueba la clave y la conexión. Devuelve un texto para enseñar al usuario. */
+    suspend fun test(): String = withContext(Dispatchers.IO) {
+        val key = keyProvider().trim()
+        if (key.isBlank()) return@withContext "No hay ninguna clave configurada."
+        val url = "$base/configuration".toHttpUrl().newBuilder().addQueryParameter("api_key", key).build()
+        try {
+            http.newCall(Request.Builder().url(url).build()).execute().use { r ->
+                when (r.code) {
+                    200 -> { lastError = null; "Funciona correctamente (clave de ${key.length} caracteres)." }
+                    401 -> "La clave no es válida. Revisa que sea la «Clave de la API» corta, sin espacios."
+                    404 -> "La clave no es válida o TMDB aún no la ha activado."
+                    429 -> "TMDB pide esperar un poco (demasiadas consultas)."
+                    else -> "TMDB respondió con el código ${r.code}."
+                }
+            }
+        } catch (e: Exception) {
+            "No hay conexión con TMDB: ${e.message ?: e.javaClass.simpleName}"
+        }
+    }
+
     private fun sha1(s: String): String =
         MessageDigest.getInstance("SHA-1").digest(s.toByteArray()).joinToString("") { "%02x".format(it) }
 
@@ -53,12 +76,17 @@ class TmdbClient(
             b.addQueryParameter("api_key", key)
             try {
                 http.newCall(Request.Builder().url(b.build()).build()).execute().use { resp ->
-                    if (!resp.isSuccessful) return@withContext null
+                    if (!resp.isSuccessful) {
+                        lastError = if (resp.code == 401) "Clave de TMDB no válida" else "TMDB respondió ${resp.code}"
+                        return@withContext null
+                    }
+                    lastError = null
                     val body = resp.body?.string() ?: return@withContext null
                     try { file.writeText(body) } catch (_: Exception) { }
                     JSONObject(body)
                 }
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                lastError = "Sin conexión con TMDB"
                 null
             }
         }

@@ -555,7 +555,8 @@ class Repo(
             }
             rows += later
             rows
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            tmdb.lastError = e.message ?: e.javaClass.simpleName
             emptyList()
         }
     }

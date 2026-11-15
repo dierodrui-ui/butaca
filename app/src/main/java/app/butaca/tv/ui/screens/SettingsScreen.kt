@@ -54,6 +54,8 @@ fun SettingsScreen(onLogout: () -> Unit) {
     var changingPin by remember { mutableStateOf(false) }
     var confirmLogout by remember { mutableStateOf(false) }
     var editingKey by remember { mutableStateOf(false) }
+    var tmdbTest by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
 
     fun withPin(action: () -> Unit) {
         if (!s.adultHide || unlocked || s.pin.isEmpty()) action() else guarded = action
@@ -176,6 +178,13 @@ fun SettingsScreen(onLogout: () -> Unit) {
                             value = if (s.tmdbKey.isNotBlank()) "Propia" else if (hasKey) "Incluida" else "Añadir",
                         )
                     }
+                    item {
+                        SettingRow(
+                            "Probar TMDB", tmdbTest ?: "Comprueba si la clave funciona y hay conexión.",
+                            onClick = { tmdbTest = "Probando…"; scope.launch { tmdbTest = repo.tmdb.test() } },
+                            value = "Probar",
+                        )
+                    }
                     item { SettingRow("Cerrar sesión", "Tus carpetas y favoritos se quedan guardados en este dispositivo.", onClick = { confirmLogout = true }, value = "Salir") }
                     item {
                         Column(Modifier.padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -210,7 +219,10 @@ fun SettingsScreen(onLogout: () -> Unit) {
         TextInputDialog(
             "Clave de TMDB", "Pega o escribe la clave (deja vacío para usar la incluida)", s.tmdbKey,
             onDismiss = { editingKey = false },
-            onDone = { k -> repo.prefs.update { it.copy(tmdbKey = k.trim()) }; editingKey = false },
+            onDone = { k ->
+                repo.prefs.update { it.copy(tmdbKey = k.trim()) }; editingKey = false
+                tmdbTest = "Probando…"; scope.launch { tmdbTest = repo.tmdb.test() }
+            },
             allowEmpty = true,
         )
     }

@@ -164,11 +164,14 @@ private fun SecondaryActions(item: ItemEntity, onPicker: () -> Unit) {
     )
 }
 
-/** Filas de relacionados (TMDB) y, al final, títulos del mismo estilo. */
-private fun LazyListScope.relatedRows(related: List<RelatedRow>, similar: List<ItemEntity>) {
+/** Filas de relacionados (TMDB). Si TMDB no responde, al menos los del mismo género según tu servidor. */
+private fun LazyListScope.relatedRows(related: List<RelatedRow>?, similar: List<ItemEntity>) {
+    if (related == null) {
+        item(key = "rel_loading") { T("Buscando títulos relacionados…", size = 13, color = C.Muted, modifier = Modifier.padding(top = 12.dp, start = 6.dp)) }
+        return
+    }
     related.forEachIndexed { i, row -> posterRow("rel_$i", row.title, row.items) }
-    // Sin TMDB, al menos los del mismo género según tu servidor
-    if (!ButacaApp.repo.tmdb.enabled) posterRow("similar", "Del mismo estilo", similar)
+    if (related.isEmpty()) posterRow("similar", "Del mismo estilo", similar)
 }
 
 private fun LazyListScope.posterRow(key: String, title: String, similar: List<ItemEntity>) {
@@ -218,7 +221,7 @@ fun MovieScreen(key: String, onBack: () -> Unit) {
     val progress by remember(current.stableKey) { repo.progressOf(current.stableKey) }.collectAsState(initial = null)
     val genre = info?.genre ?: current.genre
     val similar by produceState(emptyList<ItemEntity>(), current.key, genre) { value = repo.similar(current, genre) }
-    val related by produceState(emptyList<RelatedRow>(), current.key) {
+    val related by produceState<List<RelatedRow>?>(null, current.key) {
         val tid = withTimeoutOrNull(4000) { snapshotFlow { info }.filterNotNull().first() }?.tmdbId
         value = repo.related(current, tid)
     }
@@ -328,7 +331,7 @@ fun SeriesScreen(key: String, onBack: () -> Unit) {
     val epProgress = epProgressList.associateBy { it.episodeId }
     val genre = info?.genre ?: current.genre
     val similar by produceState(emptyList<ItemEntity>(), current.key, genre) { value = repo.similar(current, genre) }
-    val related by produceState(emptyList<RelatedRow>(), current.key) {
+    val related by produceState<List<RelatedRow>?>(null, current.key) {
         val tid = withTimeoutOrNull(5000) { snapshotFlow { info }.filterNotNull().first() }?.tmdbId
         value = repo.related(current, tid)
     }
