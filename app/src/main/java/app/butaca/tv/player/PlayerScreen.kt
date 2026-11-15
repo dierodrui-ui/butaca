@@ -68,7 +68,7 @@ fun PlayerScreen(req: PlayRequest, onExit: () -> Unit) {
     val settings = remember { repo.prefs.value }
     val scope = rememberCoroutineScope()
 
-    var controlsVisible by remember { mutableStateOf(true) }
+    var controlsVisible by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var currentIndex by remember { mutableStateOf(req.startIndex) }
 
@@ -229,9 +229,9 @@ fun PlayerScreen(req: PlayRequest, onExit: () -> Unit) {
                     layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
                     this.player = player
                     useController = true
-                    controllerShowTimeoutMs = 3000
                     // Menos sombra sobre la imagen
-                    findViewById<View>(androidx.media3.ui.R.id.exo_controls_background)?.setBackgroundColor(0x33000000)
+                    findViewById<View>(androidx.media3.ui.R.id.exo_controls_background)?.setBackgroundColor(0x00000000)
+                    findViewById<View>(androidx.media3.ui.R.id.exo_bottom_bar)?.setBackgroundColor(0x80000000.toInt())
                     canScrub = { player.isCurrentMediaItemSeekable && !player.isCurrentMediaItemLive && player.duration > 0 }
                     onScrub = { delta ->
                         val dur = player.duration
@@ -239,15 +239,12 @@ fun PlayerScreen(req: PlayRequest, onExit: () -> Unit) {
                         scrubDuration = dur
                         scrubTarget = (base + delta).coerceIn(0L, (dur - 1000).coerceAtLeast(0L))
                     }
-                    onScrubEnd = { }
                     playerView = this
                     keepScreenOn = true
                     setShowSubtitleButton(true)
                     setShowNextButton(req.items.size > 1)
                     setShowPreviousButton(req.items.size > 1)
                     setControllerVisibilityListener(PlayerView.ControllerVisibilityListener { v -> controlsVisible = v == View.VISIBLE })
-                    isFocusable = true
-                    isFocusableInTouchMode = true
                     post { requestFocus() }
                 }
             },
@@ -281,7 +278,7 @@ fun PlayerScreen(req: PlayRequest, onExit: () -> Unit) {
             val item = req.items.getOrNull(currentIndex)
             Column(
                 Modifier.fillMaxWidth()
-                    .background(Brush.verticalGradient(0f to Color(0x99000000), 1f to Color.Transparent))
+                    .background(Brush.verticalGradient(0f to Color(0x80000000), 1f to Color.Transparent))
                     .padding(horizontal = 48.dp, vertical = 30.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {

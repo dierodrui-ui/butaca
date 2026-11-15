@@ -38,6 +38,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
@@ -212,11 +213,14 @@ fun MovieScreen(key: String, onBack: () -> Unit) {
 
     val resumeMs = progress?.takeIf { !it.finished && it.positionMs > 60_000 }?.positionMs ?: 0L
 
+    var headerFocused by remember { mutableStateOf(true) }
+    val movieList = rememberLazyListState()
     Box(Modifier.fillMaxSize().background(C.Bg)) {
         Backdrop(info?.backdrop ?: current.backdrop, Modifier.fillMaxWidth().height(520.dp))
-        PivotScope(pivot = 80.dp) {
+        PivotScope(pivot = 80.dp, enabled = { !headerFocused }) {
             LazyColumn(
                 Modifier.fillMaxSize(),
+                state = movieList,
                 contentPadding = PaddingValues(start = 48.dp, end = 48.dp, top = 30.dp, bottom = 60.dp),
                 verticalArrangement = Arrangement.spacedBy(18.dp),
             ) {
@@ -227,7 +231,13 @@ fun MovieScreen(key: String, onBack: () -> Unit) {
                     }
                 }
                 item(key = "header") {
-                    Row(horizontalArrangement = Arrangement.spacedBy(32.dp)) {
+                    Row(
+                        Modifier.onFocusChanged {
+                            headerFocused = it.hasFocus
+                            if (it.hasFocus) scope.launch { movieList.animateScrollToItem(0) }
+                        },
+                        horizontalArrangement = Arrangement.spacedBy(32.dp),
+                    ) {
                         Box(Modifier.width(200.dp).aspectRatio(2f / 3f).clip(RoundedCornerShape(12.dp))) {
                             Artwork(info?.poster ?: current.icon, current.name, current.stableKey, Modifier.fillMaxSize(), titleSize = 20)
                         }
@@ -304,6 +314,7 @@ fun SeriesScreen(key: String, onBack: () -> Unit) {
     val genre = info?.genre ?: current.genre
     val similar by produceState(emptyList<ItemEntity>(), current.key, genre) { value = repo.similar(current, genre) }
     var picker by remember { mutableStateOf(false) }
+    var inList by remember { mutableStateOf(false) }
     val playFocus = remember { FocusRequester() }
     val listState = rememberLazyListState()
 
@@ -325,65 +336,65 @@ fun SeriesScreen(key: String, onBack: () -> Unit) {
     }
 
     Box(Modifier.fillMaxSize().background(C.Bg)) {
-        Backdrop(info?.backdrop ?: current.backdrop, Modifier.fillMaxWidth().height(460.dp))
-        PivotScope(pivot = 80.dp) {
-            LazyColumn(
-                Modifier.fillMaxSize(),
-                state = listState,
-                contentPadding = PaddingValues(start = 48.dp, end = 48.dp, top = 30.dp, bottom = 60.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
+        Backdrop(info?.backdrop ?: current.backdrop, Modifier.fillMaxWidth().height(440.dp))
+        // La cabecera queda fija arriba; solo se desplaza la lista de episodios
+        Column(Modifier.fillMaxSize().padding(start = 48.dp, end = 48.dp, top = 26.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(9.dp), modifier = Modifier.fillMaxWidth(0.72f)) {
+                T(listOfNotNull("Serie", genre).joinToString(" · "), size = 13, color = C.TextSoft, maxLines = 1)
+                T(current.name, size = if (inList) 24 else 32, weight = FontWeight.Bold, maxLines = if (inList) 1 else 2, lineHeight = if (inList) 28 else 36)
+                val seasons = info?.seasons?.size ?: 0
+                val meta = listOfNotNull(
+                    current.year?.toString() ?: info?.releaseDate?.take(4),
+                    if (seasons > 0) (if (seasons == 1) "1 temporada" else "$seasons temporadas") else null,
+                    ratingText(info?.rating ?: current.rating),
+                ).joinToString(" · ")
+                if (meta.isNotBlank()) T(meta, size = 14, color = C.Muted)
+                if (!inList) {
+                    val plot = info?.plot ?: current.plot
+                    if (!plot.isNullOrBlank()) T(plot, size = 14, color = C.TextSoft, maxLines = 3, lineHeight = 20)
+                    info?.cast?.let { T("Reparto: $it", size = 12, color = C.Muted, maxLines = 1) }
+                }
+            }
+            FlowRow(
+                Modifier.padding(top = 14.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                item(key = "header") {
-                    Column(verticalArrangement = Arrangement.spacedBy(11.dp), modifier = Modifier.fillMaxWidth(0.72f)) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Icon(Ic.Back, null, tint = C.Muted, modifier = Modifier.size(16.dp))
-                            T("Atrás para volver", size = 13, color = C.Muted)
-                        }
-                        T(listOfNotNull("Serie", genre).joinToString(" · "), size = 13, color = C.TextSoft, maxLines = 1)
-                        T(current.name, size = 32, weight = FontWeight.Bold, maxLines = 2, lineHeight = 36)
-                        val seasons = info?.seasons?.size ?: 0
-                        val meta = listOfNotNull(
-                            current.year?.toString() ?: info?.releaseDate?.take(4),
-                            if (seasons > 0) (if (seasons == 1) "1 temporada" else "$seasons temporadas") else null,
-                            ratingText(info?.rating ?: current.rating),
-                        ).joinToString(" · ")
-                        if (meta.isNotBlank()) T(meta, size = 14, color = C.Muted)
-                        val plot = info?.plot ?: current.plot
-                        if (!plot.isNullOrBlank()) T(plot, size = 14, color = C.TextSoft, maxLines = 3, lineHeight = 20)
-                        info?.cast?.let { T("Reparto: $it", size = 12, color = C.Muted, maxLines = 1) }
-                    }
+                val label = when {
+                    info == null && !failed -> "Cargando episodios…"
+                    nextEp == null -> "Sin episodios"
+                    progress == null -> "Empezar · T${nextEp.season} E${nextEp.number}"
+                    else -> "Continuar · T${nextEp.season} E${nextEp.number}"
                 }
-                item(key = "actions") {
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
-                        val label = when {
-                            info == null && !failed -> "Cargando episodios…"
-                            nextEp == null -> "Sin episodios"
-                            progress == null -> "Empezar · T${nextEp.season} E${nextEp.number}"
-                            else -> "Continuar · T${nextEp.season} E${nextEp.number}"
-                        }
-                        ActionButton(label, Ic.Play, onClick = { nextEp?.let { play(it, nextResume) } }, primary = true, modifier = Modifier.focusRequester(playFocus))
-                        SecondaryActions(current) { picker = true }
-                    }
-                }
-                item(key = "chips") { FolderChips(current.stableKey) }
-                if (failed) item(key = "failed") { EmptyState("No se han podido cargar los episodios", "Comprueba la conexión y vuelve a entrar.") }
-                val seasons = info?.seasons.orEmpty()
-                if (seasons.size > 1) {
-                    item(key = "seasons") {
-                        TvRow(gap = 8.dp) {
-                            items(seasons) { s -> Pill("Temporada $s", s == season, { season = s }, small = true) }
+                ActionButton(label, Ic.Play, onClick = { nextEp?.let { play(it, nextResume) } }, primary = true, modifier = Modifier.focusRequester(playFocus))
+                SecondaryActions(current) { picker = true }
+            }
+            if (!inList) Box(Modifier.padding(top = 12.dp)) { FolderChips(current.stableKey) }
+
+            PivotScope(pivot = 12.dp) {
+                LazyColumn(
+                    Modifier.weight(1f).fillMaxWidth().padding(top = 14.dp)
+                        .onFocusChanged { inList = it.hasFocus },
+                    state = listState,
+                    contentPadding = PaddingValues(bottom = 40.dp, top = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    if (failed) item(key = "failed") { EmptyState("No se han podido cargar los episodios", "Comprueba la conexión y vuelve a entrar.") }
+                    val seasons = info?.seasons.orEmpty()
+                    if (seasons.size > 1) {
+                        item(key = "seasons") {
+                            TvRow(gap = 8.dp) {
+                                items(seasons) { s -> Pill("Temporada $s", s == season, { season = s }, small = true) }
+                            }
                         }
                     }
+                    items(episodes.filter { it.season == season }, key = { it.id }) { ep ->
+                        val p = epProgress[ep.id]
+                        EpisodeRow(ep, p?.finished == true, p?.takeIf { !it.finished && it.durationMs > 0 }?.let { it.positionMs.toFloat() / it.durationMs },
+                            onClick = { play(ep, p?.takeIf { !it.finished }?.positionMs ?: 0L) })
+                    }
+                    similarRow(similar)
                 }
-                items(episodes.filter { it.season == season }, key = { it.id }) { ep ->
-                    val p = epProgress[ep.id]
-                    EpisodeRow(ep, p?.finished == true, p?.takeIf { !it.finished && it.durationMs > 0 }?.let { it.positionMs.toFloat() / it.durationMs },
-                        onClick = { play(ep, p?.takeIf { !it.finished }?.positionMs ?: 0L) })
-                }
-                similarRow(similar)
             }
         }
     }
@@ -394,7 +405,7 @@ fun SeriesScreen(key: String, onBack: () -> Unit) {
 private fun EpisodeRow(ep: Episode, watched: Boolean, progress: Float?, onClick: () -> Unit) {
     FocusSurface(
         onClick = onClick,
-        modifier = Modifier.fillMaxWidth(0.85f).height(92.dp),
+        modifier = Modifier.fillMaxWidth(0.9f).height(82.dp),
         radius = 12.dp, container = C.Surface, focusedContainer = C.Raised, focusedScale = 1.01f,
     ) {
         Row(Modifier.fillMaxSize().padding(8.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {

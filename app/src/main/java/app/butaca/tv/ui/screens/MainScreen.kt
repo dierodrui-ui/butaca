@@ -14,7 +14,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import android.app.Activity
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalContext
+import app.butaca.tv.ui.components.ConfirmDialog
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -55,7 +59,10 @@ private fun Tab.icon(): ImageVector = when (this) {
 @Composable
 fun MainScreen(onLogout: () -> Unit) {
     var tab by rememberSaveable { mutableStateOf(Tab.HOME) }
-    BackHandler(enabled = tab != Tab.HOME) { tab = Tab.HOME }
+    var askExit by remember { mutableStateOf(false) }
+    val activity = LocalContext.current as? Activity
+    // Atrás: desde cualquier sección vuelve a Inicio; en Inicio pregunta antes de salir
+    BackHandler { if (tab != Tab.HOME) tab = Tab.HOME else askExit = true }
     val requested by ButacaApp.repo.requestedFolder.collectAsState()
     LaunchedEffect(requested) { if (requested != null) tab = Tab.FOLDERS }
 
@@ -75,6 +82,12 @@ fun MainScreen(onLogout: () -> Unit) {
             }
         }
         SyncBanner(Modifier.align(Alignment.BottomEnd).padding(24.dp))
+    }
+    if (askExit) {
+        ConfirmDialog(
+            "¿Quieres salir de Butaca?", "Tus listas y lo que estabas viendo se quedan guardados.", "Salir",
+            onDismiss = { askExit = false }, onConfirm = { activity?.finish() },
+        )
     }
 }
 
