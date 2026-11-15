@@ -48,7 +48,7 @@ private val Ease = CubicBezierEasing(0.16f, 1f, 0.3f, 1f)       // salida suave
 private val EaseIn = CubicBezierEasing(0.7f, 0f, 0.84f, 0f)
 
 /**
- * Intro de cine (unos 4 s): un haz de proyector se abre, golpe de sonido, aparece la butaca
+ * Intro de cine (unos 7 s): un haz de proyector se abre, golpe de sonido, aparece la butaca
  * con un resplandor rojo, se escribe «Butaca» y un destello recorre el nombre. Cualquier botón la salta.
  */
 @Composable
@@ -79,21 +79,21 @@ fun IntroScreen(onDone: () -> Unit) {
     }
 
     LaunchedEffect(Unit) {
-        // 0,0 – 1,0 s: el haz del proyector se abre (sube el whoosh)
-        launch { beam.animateTo(1f, tween(1000, easing = EaseIn)) }
-        delay(980)
-        // 1,0 s: golpe
-        launch { flash.snapTo(1f); flash.animateTo(0f, tween(700, easing = LinearEasing)) }
-        launch { beam.animateTo(0f, tween(500)) }
-        launch { logo.animateTo(1f, tween(900, easing = Ease)) }
-        launch { glow.animateTo(1f, tween(500)); glow.animateTo(0.55f, tween(1600)) }
-        delay(350)
-        val w = async { word.animateTo(1f, tween(1100, easing = Ease)) }
-        delay(700)
-        sweep.animateTo(1.3f, tween(1100, easing = LinearEasing))
+        // 0,0 – 3,1 s: el sonido crece hasta el gran acorde y el haz del proyector se va abriendo
+        launch { beam.animateTo(1f, tween(3100, easing = EaseIn)) }
+        delay(3080)
+        // 3,1 s: llega el acorde con el golpe
+        launch { flash.snapTo(1f); flash.animateTo(0f, tween(900, easing = LinearEasing)) }
+        launch { beam.animateTo(0f, tween(600)) }
+        launch { logo.animateTo(1f, tween(1100, easing = Ease)) }
+        launch { glow.animateTo(1f, tween(600)); glow.animateTo(0.6f, tween(2600)) }
+        delay(450)
+        val w = async { word.animateTo(1f, tween(1400, easing = Ease)) }
+        delay(900)
+        sweep.animateTo(1.3f, tween(1300, easing = LinearEasing))
         w.await()
-        delay(250)
-        out.animateTo(0f, tween(550, easing = EaseIn))
+        delay(500)
+        out.animateTo(0f, tween(750, easing = EaseIn))
         finish()
     }
 

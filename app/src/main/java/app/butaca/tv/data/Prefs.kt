@@ -34,6 +34,9 @@ data class Settings(
     val tmdbSession: String = "",
     val tmdbAccountId: Int = 0,
     val tmdbUser: String = "",
+    // Orden y categorías ocultas de «Películas por categorías de TMDB» (ids separados por comas)
+    val hubOrder: String = "",
+    val hubHidden: String = "",
     val tmdbLists: String = "",      // "folderId:listId,folderId:listId"
     val lastCloudSync: Long = 0L,
 ) {
@@ -73,6 +76,8 @@ class Prefs(context: Context) {
         tmdbAccountId = sp.getInt("tmdbAccountId", 0),
         tmdbUser = sp.getString("tmdbUser", "") ?: "",
         tmdbLists = sp.getString("tmdbLists", "") ?: "",
+        hubOrder = sp.getString("hubOrder", "") ?: "",
+        hubHidden = sp.getString("hubHidden", "") ?: "",
         lastCloudSync = sp.getLong("lastCloudSync", 0L),
     )
 
@@ -105,6 +110,8 @@ class Prefs(context: Context) {
             .putInt("tmdbAccountId", s.tmdbAccountId)
             .putString("tmdbUser", s.tmdbUser)
             .putString("tmdbLists", s.tmdbLists)
+            .putString("hubOrder", s.hubOrder)
+            .putString("hubHidden", s.hubHidden)
             .putLong("lastCloudSync", s.lastCloudSync)
             .apply()
         _flow.value = s

@@ -714,12 +714,15 @@ class Repo(
 
     // ----- Ir a una carpeta desde otra pantalla -----
     val requestedFolder = MutableStateFlow<Long?>(null)
+    @Volatile private var systemColorsDone = false
 
     // ----- Carpetas -----
     suspend fun ensureSystemFolders() {
         val dao = db.folders()
-        if (dao.systemFolder("later") == null) dao.insertFolder(FolderEntity(name = "Ver más adelante", color = 0xFFFFB020, position = -2, system = "later"))
-        if (dao.systemFolder("fav") == null) dao.insertFolder(FolderEntity(name = "Favoritos", color = 0xFFFF6B5A, position = -1, system = "fav"))
+        if (dao.systemFolder("later") == null) dao.insertFolder(FolderEntity(name = "Ver más adelante", color = 0xFFE8344B, position = -2, system = "later"))
+        if (dao.systemFolder("fav") == null) dao.insertFolder(FolderEntity(name = "Favoritos", color = 0xFFE8344B, position = -1, system = "fav"))
+        // Con la nueva imagen, las dos listas fijas van en el rojo de la app
+        if (!systemColorsDone) { dao.setSystemColor(0xFFE8344B); systemColorsDone = true }
     }
 
     fun folders(): Flow<List<FolderEntity>> = db.folders().observeFolders()

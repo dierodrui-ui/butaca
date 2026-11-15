@@ -129,10 +129,27 @@ suspend fun Repo.movieHub(force: Boolean = false): Hub {
     add("others", "Otras películas", all.filter { it.stableKey !in inRows })
     add("all", "Todas las películas", all, min = 1)
 
-    val hub = Hub(rows, all.size, pending, unclassified)
+    val hub = Hub(rows, all.size, pending, unclassified)   // orden original; el tuyo se aplica con arrange()
     HubCache.hub = hub
     HubCache.at = System.currentTimeMillis()
     HubCache.kids = kids
     HubCache.basedOn = identifiedNow
     return hub
+}
+
+/** Aplica tu orden y tus categorías ocultas. Lo que no has movido sigue en su sitio de siempre. */
+fun Hub.arrange(order: String, hidden: String): List<HubRow> {
+    val hide = hidden.split(',').filter { it.isNotBlank() }.toSet()
+    val saved = order.split(',').filter { it.isNotBlank() }
+    val byId = rows.associateBy { it.id }
+    val out = ArrayList<HubRow>()
+    saved.forEach { id -> byId[id]?.let { out += it } }
+    // las nuevas (p. ej. «Estrenos de 2027») entran en su posición natural
+    rows.forEachIndexed { i, r ->
+        if (r.id in saved) return@forEachIndexed
+        val prev = rows.subList(0, i).lastOrNull { it.id in saved || out.contains(it) }
+        val at = if (prev == null) 0 else out.indexOf(prev) + 1
+        out.add(at.coerceIn(0, out.size), r)
+    }
+    return out.filter { it.id !in hide }
 }

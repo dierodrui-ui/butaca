@@ -26,6 +26,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.foundation.border
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import app.butaca.tv.data.arrange
+import kotlinx.coroutines.launch
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -94,7 +102,15 @@ private fun MovieHubView(onServer: () -> Unit) {
     val hub by produceState<Hub?>(HubCache.hub, settings.kidsLimit, settings.tmdbKey, tick) {
         value = try { repo.movieHub() } catch (_: Exception) { value }
     }
-    val rows = hub?.rows.orEmpty()
+    // Tu orden de categorías (y las que has ocultado)
+    var moving by remember { mutableStateOf<String?>(null) }
+    var draft by remember { mutableStateOf<List<String>>(emptyList()) }
+    var catMenu by remember { mutableStateOf<HubRow?>(null) }
+    val arranged = remember(hub, settings.hubOrder, settings.hubHidden) { hub?.arrange(settings.hubOrder, settings.hubHidden).orEmpty() }
+    val rows = if (moving != null) draft.mapNotNull { id -> arranged.firstOrNull { it.id == id } } else arranged
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    fun saveOrder(ids: List<String>) { repo.prefs.update { it.copy(hubOrder = ids.joinToString(",")) } }
     var selected by rememberSaveable { mutableStateOf("") }
     var pendingFocus by remember { mutableStateOf("") }
     LaunchedEffect(pendingFocus) { if (pendingFocus.isNotEmpty()) { delay(220); selected = pendingFocus } }
@@ -118,20 +134,72 @@ private fun MovieHubView(onServer: () -> Unit) {
         Row(Modifier.weight(1f).fillMaxWidth()) {
             // ---------- Categorías de TMDB ----------
             Column(Modifier.width(250.dp).fillMaxHeight().background(C.Panel).padding(top = 24.dp, start = 12.dp, end = 12.dp)) {
-                T("Películas", size = 22, weight = FontWeight.SemiBold, modifier = Modifier.padding(start = 12.dp, bottom = 12.dp))
+                T("Películas", size = 22, weight = FontWeight.SemiBold, modifier = Modifier.padding(start = 12.dp, bottom = 4.dp))
+                T(
+                    if (moving != null) "▲ ▼ para mover · OK para dejarla ahí" else "Mantén OK sobre una categoría para moverla u ocultarla",
+                    size = 11, color = if (moving != null) C.AccentSoft else C.Faint,
+                    modifier = Modifier.padding(start = 12.dp, bottom = 10.dp, end = 8.dp),
+                )
                 LazyColumn(
-                    Modifier.weight(1f).focusRestorer(),
+                    Modifier.weight(1f).focusRestorer()
+                        .onPreviewKeyEvent { e ->
+                            val id = moving ?: return@onPreviewKeyEvent false
+                            if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent true
+                            val i = draft.indexOf(id)
+                            when (e.key) {
+                                Key.DirectionUp, Key.DirectionDown -> {
+                                    val j = if (e.key == Key.DirectionUp) i - 1 else i + 1
+                                    if (i >= 0 && j in draft.indices) {
+                                        draft = draft.toMutableList().also { l -> l[i] = l[j]; l[j] = id }
+                                        scope.launch {
+                                            val vis = listState.layoutInfo.visibleItemsInfo
+                                            if (vis.isNotEmpty() && (j <= vis.first().index || j >= vis.last().index)) listState.animateScrollToItem((j - 4).coerceAtLeast(0))
+                                        }
+                                    }
+                                    true
+                                }
+                                Key.DirectionCenter, Key.Enter, Key.NumPadEnter, Key.Back, Key.Escape -> {
+                                    saveOrder(draft); moving = null; true
+                                }
+                                else -> true
+                            }
+                        },
+                    state = listState,
                     verticalArrangement = Arrangement.spacedBy(2.dp),
                     contentPadding = PaddingValues(bottom = 30.dp),
                 ) {
                     items(rows, key = { it.id }) { r ->
+                        val isMoving = moving == r.id
                         MenuRow(
-                            r.title, if (r.id == "foryou") Ic.Heart else if (r.numbered) Ic.Star else null,
-                            onClick = { selected = r.id },
-                            selected = row?.id == r.id,
-                            iconTint = if (row?.id == r.id) C.Accent else C.Muted,
-                            modifier = Modifier.onFocusChanged { if (it.isFocused) pendingFocus = r.id },
+                            r.title, if (isMoving) Ic.Sort else if (r.id == "foryou") Ic.Heart else if (r.numbered) Ic.Star else null,
+                            onClick = { if (moving == null) selected = r.id },
+                            onLongClick = { if (moving == null) catMenu = r },
+                            selected = row?.id == r.id || isMoving,
+                            iconTint = if (isMoving || row?.id == r.id) C.Accent else C.Muted,
+                            trailing = if (isMoving) "▲▼" else null,
+                            modifier = Modifier
+                                .then(if (isMoving) Modifier.border(2.dp, C.Accent, androidx.compose.foundation.shape.RoundedCornerShape(10.dp)) else Modifier)
+                                .onFocusChanged { if (it.isFocused && moving == null) pendingFocus = r.id },
                         )
+                    }
+                }
+            }
+            catMenu?.let { r ->
+                app.butaca.tv.ui.components.AppDialog(onDismiss = { catMenu = null }) {
+                    T(r.title, size = 22, weight = FontWeight.SemiBold)
+                    T("Organiza tus categorías a tu gusto", size = 14, color = C.Muted)
+                    val ids = arranged.map { it.id }
+                    MenuRow("Mover (con ▲ ▼)", Ic.Sort, onClick = { draft = ids; moving = r.id; catMenu = null })
+                    MenuRow("Subir al principio", Ic.Back, onClick = { saveOrder(listOf(r.id) + ids.filter { it != r.id }); catMenu = null })
+                    MenuRow("Bajar al final", Ic.Chevron, onClick = { saveOrder(ids.filter { it != r.id } + r.id); catMenu = null })
+                    MenuRow("Ocultar esta categoría", Ic.EyeOff, onClick = {
+                        repo.prefs.update { s -> s.copy(hubHidden = (s.hubHidden.split(',').filter { it.isNotBlank() } + r.id).distinct().joinToString(",")) }
+                        catMenu = null
+                    })
+                    if (settings.hubOrder.isNotBlank() || settings.hubHidden.isNotBlank()) {
+                        MenuRow("Volver al orden original y mostrar todas", Ic.Refresh, onClick = {
+                            repo.prefs.update { it.copy(hubOrder = "", hubHidden = "") }; catMenu = null
+                        })
                     }
                 }
             }

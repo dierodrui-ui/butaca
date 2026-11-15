@@ -333,6 +333,9 @@ interface FolderDao {
     @Query("UPDATE folder SET name = :name, color = :color WHERE id = :id")
     suspend fun updateFolder(id: Long, name: String, color: Long)
 
+    @Query("UPDATE folder SET color = :color WHERE system IN ('fav','later')")
+    suspend fun setSystemColor(color: Long)
+
     @Query("DELETE FROM folder WHERE id = :id AND system IS NULL")
     suspend fun deleteFolder(id: Long)
 

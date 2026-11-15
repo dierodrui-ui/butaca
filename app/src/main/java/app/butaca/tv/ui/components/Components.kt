@@ -48,6 +48,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.withStyle
 import androidx.tv.material3.Border
 import androidx.tv.material3.ClickableSurfaceDefaults
 import androidx.tv.material3.Icon
@@ -107,7 +108,12 @@ fun T(
     lineHeight: Int? = null,
 ) {
     Text(
-        text = text,
+        // Las estrellas de la nota, en el rojo de la app
+        text = if (text.indexOf('★') < 0) androidx.compose.ui.text.AnnotatedString(text) else androidx.compose.ui.text.buildAnnotatedString {
+            text.forEach { ch ->
+                if (ch == '★') withStyle(androidx.compose.ui.text.SpanStyle(color = C.Accent)) { append(ch) } else append(ch)
+            }
+        },
         modifier = modifier,
         fontSize = size.sp,
         fontWeight = weight,
@@ -278,11 +284,11 @@ fun PosterCard(
                     if (fav) Box(
                         Modifier.size(24.dp).clip(CircleShape).background(Color(0xE607080C)),
                         contentAlignment = Alignment.Center,
-                    ) { Icon(Ic.HeartFilled, "Favorito", tint = C.Red, modifier = Modifier.size(14.dp)) }
+                    ) { Icon(Ic.HeartFilled, "Favorito", tint = C.Accent, modifier = Modifier.size(14.dp)) }
                     if (later) Box(
                         Modifier.size(24.dp).clip(CircleShape).background(Color(0xE607080C)),
                         contentAlignment = Alignment.Center,
-                    ) { Icon(Ic.Clock, "Ver más adelante", tint = C.Gold, modifier = Modifier.size(14.dp)) }
+                    ) { Icon(Ic.Clock, "Ver más adelante", tint = C.Accent, modifier = Modifier.size(14.dp)) }
                 }
             }
         }
