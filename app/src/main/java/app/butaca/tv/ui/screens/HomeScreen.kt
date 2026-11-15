@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.widthIn
 import app.butaca.tv.data.heroExtra
+import app.butaca.tv.data.topMatches
 import app.butaca.tv.data.homeRows
 import app.butaca.tv.data.upcomingNotInServer
 import app.butaca.tv.data.alerts
@@ -120,6 +121,11 @@ fun HomeScreen(onGoFolders: () -> Unit) {
     val settings by repo.prefs.flow.collectAsState()
     // Filas de TMDB: «Porque viste…», tendencias, imprescindibles, de temporada…
     val discovery by produceState(emptyList<RelatedRow>(), settings.tmdbKey, repo.kidsLimit) { value = repo.homeRows() }
+    // Lo más compatible contigo ahora (90-100 %): cambia cada vez que entras
+    val tasteModel = app.butaca.tv.ui.components.LocalTaste.current
+    val topMatch by produceState(emptyList<ItemEntity>(), tasteModel?.signals, repo.kidsLimit) {
+        value = try { repo.topMatches() } catch (_: Exception) { emptyList() }
+    }
     val upcoming by produceState(emptyList<TmdbTitle>(), settings.tmdbKey, repo.kidsLimit) { value = repo.upcomingNotInServer() }
     val alerts by remember { repo.alerts() }.collectAsState(initial = emptyList())
     val alertKeys = alerts.map { it.key }.toSet()
@@ -251,6 +257,9 @@ fun HomeScreen(onGoFolders: () -> Unit) {
                             }
                         }
                     }
+                }
+                if (topMatch.size >= 3) {
+                    item(key = "topMatch") { ItemRow("Muy compatibles contigo ahora · 90-100 %", topMatch, watched) }
                 }
                 discovery.forEachIndexed { i, row ->
                     item(key = "disc_$i") { ItemRow(row.title, row.items, watched) }

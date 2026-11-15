@@ -10,14 +10,20 @@ data class HubRow(val id: String, val title: String, val all: List<ItemEntity>, 
 
 data class Hub(val rows: List<HubRow>, val identified: Int, val pending: Int, val unclassified: Int)
 
-/** Última versión calculada, para abrir «Ver todo» sin volver a calcular. */
+/** Última versión calculada de cada catálogo (películas y series). */
 object HubCache {
-    @Volatile var hub: Hub? = null
-    @Volatile var at = 0L
-    @Volatile var kids = -1
-    @Volatile var basedOn = -1
-    fun row(id: String): HubRow? = hub?.rows?.firstOrNull { it.id == id }
+    class Entry(val hub: Hub, val at: Long, val kids: Int, val basedOn: Int)
+    val entries = java.util.concurrent.ConcurrentHashMap<String, Entry>()
+    var hub: Hub?
+        get() = entries[ContentType.MOVIE]?.hub
+        set(v) { if (v == null) entries.clear() }
+    fun hub(type: String): Hub? = entries[type]?.hub
+    fun row(id: String): HubRow? = entries.values.firstNotNullOfOrNull { e -> e.hub.rows.firstOrNull { it.id == id } }
 }
+
+/** Catálogo por categorías de TMDB: películas o series. */
+suspend fun Repo.catalogHub(type: String, force: Boolean = false): Hub =
+    if (type == ContentType.SERIES) seriesHub(force) else movieHub(force)
 
 /**
  * Todas tus películas ordenadas en categorías al estilo de las plataformas, con datos de TMDB
@@ -26,10 +32,10 @@ object HubCache {
 suspend fun Repo.movieHub(force: Boolean = false): Hub {
     val kids = kidsLimit
     val identifiedNow = db.items().identified(ContentType.MOVIE).size
-    val cached = HubCache.hub
-    if (!force && cached != null && HubCache.kids == kids && HubCache.basedOn == identifiedNow &&
-        System.currentTimeMillis() - HubCache.at < 30 * 60_000L
-    ) return cached
+    val cached = HubCache.entries[ContentType.MOVIE]
+    if (!force && cached != null && cached.kids == kids && cached.basedOn == identifiedNow &&
+        System.currentTimeMillis() - cached.at < 30 * 60_000L
+    ) return cached.hub
 
     val all = withContext(Dispatchers.Default) {
         collapseVariants(db.items().identified(ContentType.MOVIE).filter { kidsOk(it) }, ContentType.MOVIE)
@@ -38,7 +44,7 @@ suspend fun Repo.movieHub(force: Boolean = false): Hub {
     val pending = db.items().pendingEnrichCount()
     val unclassified = db.items().unidentifiedCount(ContentType.MOVIE)
     if (!tmdb.enabled || all.isEmpty()) {
-        return Hub(emptyList(), all.size, pending, unclassified).also { HubCache.hub = it }
+        return Hub(emptyList(), all.size, pending, unclassified)
     }
 
     // id de género → nombre en castellano, tal como queda guardado en cada título
@@ -83,8 +89,10 @@ suspend fun Repo.movieHub(force: Boolean = false): Hub {
             }
         }
         val picks = score.entries.sortedByDescending { it.value }.mapNotNull { byKey[it.key] }.take(30)
-        add("foryou", if (favs.isNotEmpty()) "Películas que creemos que te gustarán" else "Porque has visto…", picks)
+        add("foryou", "Películas que creemos que te gustarán", picks)
     }
+    // Siempre existe: en pantalla se rellena con tu «% para ti» (80-100 %)
+    if (rows.none { it.id == "foryou" }) rows.add(0, HubRow("foryou", "Películas que creemos que te gustarán", emptyList()))
 
     genre("action", "Cine de acción", 28)
     genre("scifi", "Cine de ciencia ficción", 878)
@@ -130,10 +138,81 @@ suspend fun Repo.movieHub(force: Boolean = false): Hub {
     add("all", "Todas las películas", all, min = 1)
 
     val hub = Hub(rows, all.size, pending, unclassified)   // orden original; el tuyo se aplica con arrange()
-    HubCache.hub = hub
-    HubCache.at = System.currentTimeMillis()
-    HubCache.kids = kids
-    HubCache.basedOn = identifiedNow
+    HubCache.entries[ContentType.MOVIE] = HubCache.Entry(hub, System.currentTimeMillis(), kids, identifiedNow)
+    return hub
+}
+
+/**
+ * Todas tus series por categorías de TMDB: plataformas, géneros de series, españolas, épocas y estrenos.
+ * Los ids van con «s_» para que su orden no se mezcle con el de películas.
+ */
+suspend fun Repo.seriesHub(force: Boolean = false): Hub {
+    val kids = kidsLimit
+    val identifiedNow = db.items().identified(ContentType.SERIES).size
+    val cached = HubCache.entries[ContentType.SERIES]
+    if (!force && cached != null && cached.kids == kids && cached.basedOn == identifiedNow &&
+        System.currentTimeMillis() - cached.at < 30 * 60_000L
+    ) return cached.hub
+    val all = withContext(Dispatchers.Default) {
+        collapseVariants(db.items().identified(ContentType.SERIES).filter { kidsOk(it) }, ContentType.SERIES)
+            .sortedByDescending { it.pop ?: 0.0 }
+    }
+    val pending = db.items().pendingEnrichCount()
+    val unclassified = db.items().unidentifiedCount(ContentType.SERIES)
+    if (!tmdb.enabled || all.isEmpty()) return Hub(emptyList(), all.size, pending, unclassified)
+
+    val names = tmdb.genreList(true).toMap()
+    val genreSets = withContext(Dispatchers.Default) {
+        all.associate { it.key to (it.genre?.split(',')?.map { g -> TextUtil.norm(g.trim()) }?.toSet() ?: emptySet()) }
+    }
+    fun has(i: ItemEntity, vararg ids: Int) = ids.any { id -> names[id]?.let { TextUtil.norm(it) in genreSets[i.key].orEmpty() } == true }
+    val rows = ArrayList<HubRow>()
+    fun add(id: String, title: String, raw: List<ItemEntity>, numbered: Boolean = false, min: Int = 3) {
+        val list = raw.noRepeats()
+        if (list.size >= min) rows += HubRow("s_$id", title, list, numbered)
+    }
+    fun genre(id: String, title: String, vararg g: Int) = add(id, title, all.filter { has(it, *g) })
+    fun years(id: String, title: String, from: Int, to: Int) = add(id, title, all.filter { (it.year ?: 0) in from..to })
+    suspend fun network(id: String, title: String, net: Int) = try {
+        add(id, title, matchTitles(tmdb.discover(true, emptyList(), 15, mapOf("with_networks" to "$net", "sort_by" to "popularity.desc")), null)
+            .filter { it.type == ContentType.SERIES })
+    } catch (_: Exception) { }
+
+    // «Series que creemos que te gustarán» se rellena en pantalla con tu «% para ti»
+    add("foryou", "Series que creemos que te gustarán", emptyList(), min = 0)
+    try { add("top10", "Top 10 en España", matchTitles(tmdb.popular(true, "ES", 5), null).filter { it.type == ContentType.SERIES }.take(10), numbered = true) } catch (_: Exception) { }
+    network("netflix", "Series de Netflix", 213)
+    network("hbo", "Series de HBO y Max", 49)
+    network("prime", "Series de Prime Video", 1024)
+    network("disney", "Series de Disney+", 2739)
+    network("apple", "Series de Apple TV+", 2552)
+    add("spain", "Series españolas", all.filter { it.country == "ES" })
+    genre("action", "Acción y aventura", 10759)
+    genre("crime", "Series policiacas y de crimen", 80)
+    genre("mystery", "Series de misterio", 9648)
+    genre("drama", "Series de drama", 18)
+    genre("comedy", "Series de comedia", 35)
+    genre("scifi", "Ciencia ficción y fantasía", 10765)
+    genre("animation", "Animación", 16)
+    genre("kids", "Series infantiles y para toda la familia", 10762, 10751)
+    genre("docs", "Series documentales", 99)
+    genre("reality", "Realities", 10764)
+    genre("war", "Bélicas y política", 10768)
+    genre("soap", "Telenovelas", 10766)
+    try {
+        val kw = tmdb.keywordId("miniseries")
+        if (kw != null) add("mini", "Miniseries", matchTitles(tmdb.discover(true, emptyList(), 10, mapOf("with_keywords" to "$kw")), null).filter { it.type == ContentType.SERIES })
+    } catch (_: Exception) { }
+    val year = Calendar.getInstance().get(Calendar.YEAR)
+    for (y in year downTo 2020) years("y$y", "Estrenos de $y", y, y)
+    years("y2010", "Series de 2010 a 2019", 2010, 2019)
+    years("y2000", "Series de los 2000", 2000, 2009)
+    years("y90", "Series de los 90 y antes", 1950, 1999)
+    val inRows = rows.flatMap { r -> r.all.map { it.stableKey } }.toHashSet()
+    add("others", "Otras series", all.filter { it.stableKey !in inRows })
+    add("all", "Todas las series", all, min = 1)
+    val hub = Hub(rows, all.size, pending, unclassified)
+    HubCache.entries[ContentType.SERIES] = HubCache.Entry(hub, System.currentTimeMillis(), kids, identifiedNow)
     return hub
 }
 

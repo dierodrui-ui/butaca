@@ -44,6 +44,10 @@ class TasteModel(
         return (tastePart + votePart).toInt().coerceIn(0, 100)
     }
 
+    /** Todos los títulos de tu catálogo con un «% para ti» de al menos [min]. */
+    fun above(min: Int): List<Pair<String, Int>> =
+        if (!ready) emptyList() else index.keys.mapNotNull { k -> match(k)?.takeIf { it >= min }?.let { k to it } }
+
     /** Afinidad 0..1 con unos géneros (para la tirada del dado). */
     fun genreAffinity(genre: String?): Float {
         val genres = genre?.split(',')?.map { TextUtil.norm(it.trim()) }.orEmpty()
@@ -110,6 +114,11 @@ suspend fun Repo.buildTaste(): TasteModel {
         if (t.total >= 15 * 60_000L) { add(info[t.stableKey]?.genre, (0.25f * exp(-daysAgo(t.lastAt) / 14.0)).toFloat()); signals++ }
     }
     later.forEach { l -> add(info[l.stableKey]?.genre, 0.12f) }
+    // Pulgares del dado (sin haberla visto: cuentan menos que una nota)
+    val ups = DiceVotes.up(this); val downs = DiceVotes.down(this)
+    val voted = db.items().byStableKeys((ups + downs).toList().take(400)).associateBy { it.stableKey }
+    ups.forEach { k -> voted[k]?.let { add(it.genre, 0.3f); signals++ } }
+    downs.forEach { k -> voted[k]?.let { add(it.genre, -0.35f); signals++ } }
 
     val genreAff = sum.mapValues { (_, v) -> tanh(v / 2.2f) }
 
@@ -170,6 +179,7 @@ suspend fun Repo.rollDice(exclude: Set<String> = emptySet()): ItemEntity? {
     val model = Taste.model.value ?: buildTaste().also { Taste.set(it) }
     val seen = user.progress().observeWatchedKeys().first().toHashSet()
     val rated = user.taste().all().map { it.stableKey }.toHashSet()
+    val downVotes = DiceVotes.down(this)
     // Lo último que has visto empuja hacia géneros parecidos
     val recentGenres = HashMap<String, Float>()
     val recent = user.stats().observeHistory().first().take(12)
@@ -179,7 +189,7 @@ suspend fun Repo.rollDice(exclude: Set<String> = emptySet()): ItemEntity? {
     }
     val maxRecent = recentGenres.values.maxOrNull() ?: 1f
     val pool = collapseVariants(db.items().identified(ContentType.MOVIE).filter { kidsOk(it) }, ContentType.MOVIE)
-        .filter { it.stableKey !in seen && it.stableKey !in rated && it.stableKey !in exclude }
+        .filter { it.stableKey !in seen && it.stableKey !in rated && it.stableKey !in exclude && it.stableKey !in downVotes }
     if (pool.isEmpty()) return null
     val scored = pool.map { item ->
         val m = (model.match(item.genre, item.rating, item.tmdbId) ?: (50 + (((item.rating ?: 6.0) - 6.0) * 8).toInt())).coerceIn(1, 100)
@@ -193,3 +203,37 @@ suspend fun Repo.rollDice(exclude: Set<String> = emptySet()): ItemEntity? {
     return scored.first().first
 }
 
+
+
+/**
+ * «Muy compatibles contigo ahora»: lo que no has visto con un 90-100 % para ti.
+ * Cada vez que entras sale una selección distinta (las más altas, un poco barajadas).
+ */
+suspend fun Repo.topMatches(min: Int = 90, limit: Int = 24): List<ItemEntity> {
+    val model = Taste.model.value ?: return emptyList()
+    if (!model.ready) return emptyList()
+    val seen = user.progress().observeWatchedKeys().first().toHashSet()
+    val down = DiceVotes.down(this)
+    val picks = model.above(min).filter { it.first !in seen && it.first !in down }
+        .sortedByDescending { it.second }.take(90).shuffled().take(limit * 2)
+    val items = picks.map { it.first }.chunked(400).flatMap { db.items().byStableKeys(it) }
+        .filter { !it.isAdult && kidsOk(it) }
+    val byKey = (collapseVariants(items.filter { it.type == ContentType.MOVIE }, ContentType.MOVIE) +
+        collapseVariants(items.filter { it.type == ContentType.SERIES }, ContentType.SERIES)).associateBy { it.stableKey }
+    return picks.mapNotNull { byKey[it.first] }.noRepeats().take(limit)
+}
+
+/** Pulgares del dado: abajo = no vuelve a salir (y resta un poco), arriba = suma un poco. Por perfil. */
+object DiceVotes {
+    private fun sp() = app.butaca.tv.ButacaApp.instance.getSharedPreferences("dice_votes", android.content.Context.MODE_PRIVATE)
+    private fun pid(repo: Repo) = repo.profile.value?.id ?: 0L
+    fun down(repo: Repo): Set<String> = sp().getStringSet("down_${pid(repo)}", emptySet()) ?: emptySet()
+    fun up(repo: Repo): Set<String> = sp().getStringSet("up_${pid(repo)}", emptySet()) ?: emptySet()
+    fun vote(repo: Repo, stableKey: String, good: Boolean) {
+        val p = pid(repo)
+        val d = down(repo).toMutableSet(); val u = up(repo).toMutableSet()
+        if (good) { u += stableKey; d -= stableKey } else { d += stableKey; u -= stableKey }
+        sp().edit().putStringSet("down_$p", d).putStringSet("up_$p", u).apply()
+        Taste.rebuild(repo)
+    }
+}

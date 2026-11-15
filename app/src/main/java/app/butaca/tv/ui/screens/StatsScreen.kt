@@ -36,6 +36,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.foundation.focusable
+import androidx.compose.foundation.border
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
@@ -111,6 +115,7 @@ fun StatsScreen() {
     val week = last14.takeLast(7).sumOf { byDay[it]?.appMs ?: 0L }
     val today = byDay[last14.last()]
 
+    Box(Modifier.fillMaxSize()) {
     LazyColumn(
         Modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = 40.dp, end = 40.dp, top = 28.dp, bottom = 80.dp),
@@ -129,7 +134,7 @@ fun StatsScreen() {
             }
         }
         item(key = "cards") {
-            Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            Row(Modifier.focusFrame(), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                 StatCard("Tiempo en Butaca", durationLabel(totalApp), "desde que empezaste", Modifier.weight(1f))
                 StatCard("Viendo películas y series", durationLabel(totalWatch), "en total", Modifier.weight(1f))
                 StatCard("Esta semana", durationLabel(week), "hoy: " + durationLabel(today?.appMs ?: 0), Modifier.weight(1f))
@@ -176,7 +181,7 @@ fun StatsScreen() {
             }
         }
         item(key = "chart") {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(Modifier.focusFrame(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 SectionTitle("Últimos 14 días")
                 Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
                     Legend(C.Raised, "Con la app abierta")
@@ -200,7 +205,7 @@ fun StatsScreen() {
             }
         }
         if (genres.isNotEmpty()) item(key = "genres") {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(Modifier.focusFrame(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 SectionTitle("Tus géneros")
                 val max = genres.maxOf { it.second }.coerceAtLeast(1)
                 genres.forEach { (g, ms) ->
@@ -214,7 +219,6 @@ fun StatsScreen() {
                 }
             }
         }
-        item(key = "menuHost") { menuFor?.let { a -> ActivityMenu(a, scores[a.stableKey], onDismiss = { menuFor = null }) } }
         item(key = "histTitle") { SectionTitle("Historial", extra = if (history.isEmpty()) "todavía vacío" else null) }
         var lastDay = ""
         history.forEach { h ->
@@ -226,6 +230,17 @@ fun StatsScreen() {
             item(key = "h${h.day}${h.stableKey}") { HistoryRow(h) }
         }
     }
+    // El menú va fuera de la lista para que se abra siempre
+    menuFor?.let { a -> ActivityMenu(a, scores[a.stableKey], onDismiss = { menuFor = null }) }
+    }
+}
+
+/** Para que el mando pueda pararse en bloques sin botones (y la pantalla se desplace hasta ellos). */
+private fun Modifier.focusFrame(): Modifier = composed {
+    var f by remember { mutableStateOf(false) }
+    this.onFocusChanged { f = it.isFocused }.focusable()
+        .border(2.dp, if (f) C.Accent.copy(alpha = 0.7f) else Color.Transparent, RoundedCornerShape(18.dp))
+        .padding(4.dp)
 }
 
 @Composable

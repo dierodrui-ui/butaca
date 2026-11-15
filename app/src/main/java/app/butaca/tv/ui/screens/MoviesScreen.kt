@@ -73,24 +73,30 @@ private val Side = 36.dp
 
 /** Pestaña Películas: catálogo ordenado por TMDB (por defecto) o las categorías del servidor. */
 @Composable
-fun MoviesScreen() {
-    var serverView by rememberSaveable { mutableStateOf(false) }
+fun MoviesScreen() = CatalogTabScreen(ContentType.MOVIE)
+
+/** Pestañas Películas y Series: catálogo por categorías de TMDB (por defecto) o las del servidor. */
+@Composable
+fun CatalogTabScreen(type: String) {
+    var serverView by rememberSaveable(type) { mutableStateOf(false) }
     if (serverView) {
         Column(Modifier.fillMaxSize()) {
             Row(Modifier.padding(start = 24.dp, top = 14.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Pill("Por categorías de TMDB", false, { serverView = false }, small = true)
                 Pill("Categorías del servidor", true, { }, small = true)
             }
-            Box(Modifier.weight(1f)) { CatalogScreen(ContentType.MOVIE) }
+            Box(Modifier.weight(1f)) { CatalogScreen(type) }
         }
     } else {
-        MovieHubView(onServer = { serverView = true })
+        MovieHubView(type, onServer = { serverView = true })
     }
 }
 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
-private fun MovieHubView(onServer: () -> Unit) {
+private fun MovieHubView(type: String, onServer: () -> Unit) {
+    val isSeries = type == ContentType.SERIES
+    val taste = app.butaca.tv.ui.components.LocalTaste.current
     val repo = ButacaApp.repo
     val nav = LocalNav.current
     val settings by repo.prefs.flow.collectAsState()
@@ -99,29 +105,45 @@ private fun MovieHubView(onServer: () -> Unit) {
     // Mientras se leen géneros de TMDB, recalculamos de vez en cuando para ir completando
     var tick by remember { mutableStateOf(0) }
     LaunchedEffect(prep != null) { while (KidsPrep.progress.value != null) { delay(60_000); tick++ } ; tick++ }
-    val hub by produceState<Hub?>(HubCache.hub, settings.tmdbKey, repo.kidsLimit, tick) {
-        value = try { repo.movieHub() } catch (_: Exception) { value }
+    val hub by produceState<Hub?>(HubCache.hub(type), type, settings.tmdbKey, repo.kidsLimit, tick) {
+        value = try { repo.catalogHub(type) } catch (_: Exception) { value }
+    }
+    // «Te gustarán»: todo lo que encaja contigo entre un 80 y un 100 % (también lo ya visto: es como una lista más)
+    val forYou = remember(hub, taste) {
+        val all = hub?.rows?.firstOrNull { it.id.endsWith("all") }?.all.orEmpty()
+        if (taste?.ready != true) emptyList()
+        else all.mapNotNull { i -> taste.match(i.stableKey)?.takeIf { it >= 80 }?.let { i to it } }
+            .sortedWith(compareByDescending<Pair<ItemEntity, Int>> { it.second }.thenByDescending { it.first.pop ?: 0.0 }).map { it.first }
     }
     // Tu orden de categorías (y las que has ocultado)
     var moving by remember { mutableStateOf<String?>(null) }
     var draft by remember { mutableStateOf<List<String>>(emptyList()) }
     var catMenu by remember { mutableStateOf<HubRow?>(null) }
-    val arranged = remember(hub, settings.hubOrder, settings.hubHidden) { hub?.arrange(settings.hubOrder, settings.hubHidden).orEmpty() }
+    val arranged = remember(hub, settings.hubOrder, settings.hubHidden, forYou) {
+        hub?.arrange(settings.hubOrder, settings.hubHidden).orEmpty()
+            .map { r -> if (r.id.endsWith("foryou") && forYou.size >= 3) r.copy(all = forYou) else r }
+            .filter { it.all.isNotEmpty() }
+    }
     val rows = if (moving != null) draft.mapNotNull { id -> arranged.firstOrNull { it.id == id } } else arranged
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
     val scope = androidx.compose.runtime.rememberCoroutineScope()
-    fun saveOrder(ids: List<String>) { repo.prefs.update { it.copy(hubOrder = ids.joinToString(",")) } }
+    // Se guarda junto al orden de la otra pestaña (películas / series) sin pisarlo
+    fun saveOrder(ids: List<String>) {
+        val mine = hub?.rows?.map { it.id }.orEmpty().toSet()
+        repo.prefs.update { s -> s.copy(hubOrder = (s.hubOrder.split(',').filter { it.isNotBlank() && it !in mine } + ids).joinToString(",")) }
+    }
     var selected by rememberSaveable { mutableStateOf("") }
     var pendingFocus by remember { mutableStateOf("") }
     LaunchedEffect(pendingFocus) { if (pendingFocus.isNotEmpty()) { delay(220); selected = pendingFocus } }
     val row = rows.firstOrNull { it.id == selected } ?: rows.firstOrNull()
-    var sort by rememberSaveable { mutableStateOf(0) }   // 0 populares, 1 nota, 2 más recientes, 3 A-Z
-    val list: List<ItemEntity> = remember(row, sort) {
+    var sort by rememberSaveable { mutableStateOf(0) }   // 0 populares, 1 nota, 2 más recientes, 3 A-Z, 4 % para ti
+    val list: List<ItemEntity> = remember(row, sort, taste) {
         val l = row?.all.orEmpty()
         if (row?.numbered == true) l else when (sort) {
             1 -> l.sortedByDescending { it.rating ?: 0.0 }
             2 -> l.sortedByDescending { it.year ?: 0 }
             3 -> l.sortedBy { it.normName }
+            4 -> l.sortedByDescending { taste?.match(it.stableKey) ?: -1 }
             else -> l
         }
     }
@@ -134,7 +156,7 @@ private fun MovieHubView(onServer: () -> Unit) {
         Row(Modifier.weight(1f).fillMaxWidth()) {
             // ---------- Categorías de TMDB ----------
             Column(Modifier.width(250.dp).fillMaxHeight().background(C.Panel).padding(top = 24.dp, start = 12.dp, end = 12.dp)) {
-                T("Películas", size = 22, weight = FontWeight.SemiBold, modifier = Modifier.padding(start = 12.dp, bottom = 4.dp))
+                T(if (isSeries) "Series" else "Películas", size = 22, weight = FontWeight.SemiBold, modifier = Modifier.padding(start = 12.dp, bottom = 4.dp))
                 T(
                     if (moving != null) "▲ ▼ para mover · OK para dejarla ahí" else "Mantén OK sobre una categoría para moverla u ocultarla",
                     size = 11, color = if (moving != null) C.AccentSoft else C.Faint,
@@ -210,7 +232,7 @@ private fun MovieHubView(onServer: () -> Unit) {
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
                 ) {
-                    T(row?.title ?: "Películas", size = 22, weight = FontWeight.SemiBold, maxLines = 1, modifier = Modifier.weight(1f, fill = false))
+                    T(row?.title ?: (if (isSeries) "Series" else "Películas"), size = 22, weight = FontWeight.SemiBold, maxLines = 1, modifier = Modifier.weight(1f, fill = false))
                     if (row != null) T(if (list.size == 1) "1 título" else "${list.size} títulos", size = 13, color = C.Muted, maxLines = 1)
                 }
                 val h = hub
@@ -218,18 +240,18 @@ private fun MovieHubView(onServer: () -> Unit) {
                 when {
                     !repo.tmdb.enabled -> T("Añade tu clave de TMDB en Ajustes para ordenar el catálogo por categorías.", size = 13, color = C.Muted)
                     p != null -> T("Clasificando tu catálogo con TMDB… ${p.first} de ${p.second}. Las categorías se irán completando solas.", size = 13, color = C.Accent)
-                    h != null && h.unclassified > 0 -> T("${h.unclassified} películas sin identificar en TMDB: están en «Categorías del servidor».", size = 12, color = C.Faint)
+                    h != null && h.unclassified > 0 -> T("${h.unclassified} ${if (isSeries) "series" else "películas"} sin identificar en TMDB: están en «Categorías del servidor».", size = 12, color = C.Faint)
                 }
                 if (row != null && !row.numbered) {
                     Row(Modifier.padding(top = 8.dp, bottom = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf("Más populares", "Mejor nota", "Más recientes", "A-Z").forEachIndexed { i, s ->
+                        listOf("Más populares", "Mejor nota", "Más recientes", "A-Z", "% para ti").forEachIndexed { i, s ->
                             Pill(s, sort == i, { sort = i }, small = true)
                         }
                     }
                 }
                 when {
                     hub == null -> T("Preparando las categorías…", size = 14, color = C.Muted, modifier = Modifier.padding(top = 12.dp))
-                    rows.isEmpty() -> EmptyState("Todavía no hay películas clasificadas", "En unos minutos aparecerán aquí, ordenadas por categorías.")
+                    rows.isEmpty() -> EmptyState(if (isSeries) "Todavía no hay series clasificadas" else "Todavía no hay películas clasificadas", "En unos minutos aparecerán aquí, ordenadas por categorías.")
                     else -> LazyVerticalGrid(
                         columns = GridCells.Adaptive(104.dp),
                         modifier = Modifier.fillMaxSize().focusRestorer(),

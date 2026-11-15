@@ -80,7 +80,7 @@ fun MainScreen(onLogout: () -> Unit) {
                     Tab.WISH -> WishScreen()
                     Tab.LIVE -> CatalogScreen(ContentType.LIVE)
                     Tab.MOVIES -> MoviesScreen()
-                    Tab.SERIES -> CatalogScreen(ContentType.SERIES)
+                    Tab.SERIES -> CatalogTabScreen(ContentType.SERIES)
                     Tab.FOLDERS -> FoldersScreen()
                     Tab.STATS -> StatsScreen()
                     Tab.SETTINGS -> SettingsScreen(onLogout)

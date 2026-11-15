@@ -123,6 +123,8 @@ object Ic {
     private const val HEART = "M12 20s-7-4.5-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.5-7 10-7 10z"
 
     val Home = stroke("home", "M3 10.5 12 3l9 7.5V21h-6v-6H9v6H3z")
+    val ThumbUp = stroke("thumbUp", "M7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3", "M7 11l4-9a3 3 0 0 1 3 3v4h5.66a2 2 0 0 1 2 2.3l-1.38 9a2 2 0 0 1-2 1.7H7V11z")
+    val ThumbDown = stroke("thumbDown", "M17 2h3a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-3", "M17 13l-4 9a3 3 0 0 1-3-3v-4H4.34a2 2 0 0 1-2-2.3l1.38-9a2 2 0 0 1 2-1.7H17v11z")
     val Dice = stroke("dice", "M7 3h10a4 4 0 0 1 4 4v10a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4V7a4 4 0 0 1 4-4z", "M8.5 8.5h.01M15.5 15.5h.01M12 12h.01M15.5 8.5h.01M8.5 15.5h.01", width = 2.2f)
     val Stats = stroke("stats", "M4 20V10M10 20V4M16 20v-7M22 20H2")
     val Mic = stroke("mic", "M12 3a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3z", "M5 11a7 7 0 0 0 14 0M12 18v3M9 21h6")
