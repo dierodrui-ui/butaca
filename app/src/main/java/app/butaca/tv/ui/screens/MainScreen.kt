@@ -110,6 +110,12 @@ private fun Rail(current: Tab, onSelect: (Tab) -> Unit) {
             }
             T("Butaca", size = 22, weight = FontWeight.Bold)
         }
+        if (settings.kidsLimit > 0) {
+            Box(
+                Modifier.padding(start = 12.dp, bottom = 12.dp).clip(RoundedCornerShape(999.dp)).background(C.Green)
+                    .padding(horizontal = 10.dp, vertical = 4.dp)
+            ) { T("Perfil infantil · hasta ${settings.kidsLimit} años", size = 11, weight = FontWeight.Bold, color = C.Bg) }
+        }
         Tab.entries.filter { it != Tab.SETTINGS }.forEach { t ->
             MenuRow(t.label, t.icon(), onClick = { onSelect(t) }, selected = t == current, iconTint = if (t == current) C.Accent else C.Muted)
         }
@@ -136,13 +142,21 @@ private fun Rail(current: Tab, onSelect: (Tab) -> Unit) {
 @Composable
 private fun SyncBanner(modifier: Modifier) {
     val s by ButacaApp.repo.sync.collectAsState()
-    if (!s.running && s.error == null) return
+    val kids by app.butaca.tv.data.KidsPrep.progress.collectAsState()
+    val cloudRunning by app.butaca.tv.data.Cloud.running.collectAsState()
+    val text = when {
+        s.running || s.error != null -> s.error ?: s.message
+        kids != null -> "Preparando el perfil infantil… ${kids!!.first} de ${kids!!.second}"
+        cloudRunning -> "Copiando tus listas en TMDB…"
+        else -> return
+    }
+    val isError = s.error != null
     Row(
         modifier.clip(RoundedCornerShape(12.dp)).background(C.Raised).padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Box(Modifier.size(8.dp).clip(CircleShape).background(if (s.error != null) C.Red else C.Accent))
-        T(s.error ?: s.message, size = 14, color = C.TextSoft, maxLines = 2, modifier = Modifier.width(360.dp))
+        Box(Modifier.size(8.dp).clip(CircleShape).background(if (isError) C.Red else C.Accent))
+        T(text, size = 14, color = C.TextSoft, maxLines = 2, modifier = Modifier.width(360.dp))
     }
 }

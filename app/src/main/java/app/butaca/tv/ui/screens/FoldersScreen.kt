@@ -22,6 +22,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.produceState
+import app.butaca.tv.data.monthStats
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -127,9 +129,12 @@ fun FoldersScreen() {
         sel == WATCHED -> "Vistas"
         else -> selFolder?.name ?: ""
     }
+    val stats by produceState<app.butaca.tv.data.MonthStats?>(null, watchedRefs.size) { value = repo.monthStats() }
     val subtitle = when {
         sel == CONTINUE -> "Lo que has empezado y no has terminado."
-        sel == WATCHED -> "Tu historial. Lo que terminas aparece aquí solo."
+        sel == WATCHED -> stats?.takeIf { it.titles > 0 }?.let { st ->
+            "Este mes: ${st.hours} h · ${st.titles} títulos" + (if (st.topGenres.isNotEmpty()) " · lo que más ves: ${st.topGenres.joinToString(", ")}" else "")
+        } ?: "Tu historial. Lo que terminas aparece aquí solo."
         selFolder?.system == "later" -> "Lo que terminas de ver sale solo de esta lista y pasa a «Vistas»."
         selFolder?.system == "fav" -> "Tus películas, series y canales favoritos."
         else -> "Tu carpeta. Mantén OK sobre un título para moverlo o quitarlo."

@@ -5,6 +5,11 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.foundation.layout.fillMaxWidth
+import app.butaca.tv.data.cloudStart
+import app.butaca.tv.data.cloudFinish
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -34,6 +39,9 @@ import app.butaca.tv.ui.components.PinDialog
 import app.butaca.tv.ui.components.SettingRow
 import app.butaca.tv.ui.components.T
 import app.butaca.tv.ui.components.TextInputDialog
+import app.butaca.tv.data.startKidsPrep
+import app.butaca.tv.data.cloudSyncInBackground
+import app.butaca.tv.data.cloudDisconnect
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -54,6 +62,13 @@ fun SettingsScreen(onLogout: () -> Unit) {
     var changingPin by remember { mutableStateOf(false) }
     var confirmLogout by remember { mutableStateOf(false) }
     var editingKey by remember { mutableStateOf(false) }
+    var connecting by remember { mutableStateOf(false) }
+    var pendingKids by remember { mutableStateOf<Int?>(null) }
+    var kidsPinFor by remember { mutableStateOf<Int?>(null) }
+    val kidsProgress by app.butaca.tv.data.KidsPrep.progress.collectAsState()
+    val cloudRunning by app.butaca.tv.data.Cloud.running.collectAsState()
+    val cloudMsg by app.butaca.tv.data.Cloud.message.collectAsState()
+    val nav = app.butaca.tv.LocalNav.current
     var tmdbTest by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
 
@@ -127,6 +142,25 @@ fun SettingsScreen(onLogout: () -> Unit) {
                     }
                 }
                 Section.PARENTAL -> {
+                    item { Header("PERFIL INFANTIL") }
+                    item {
+                        val kp = kidsProgress
+                        SettingRow(
+                            "Perfil infantil",
+                            if (kp != null) "Preparando edades con TMDB: ${kp.first} de ${kp.second}…"
+                            else "Solo muestra lo apto para la edad elegida, según la calificación oficial (TMDB). Para quitarlo hace falta el PIN.",
+                            onClick = {
+                                val next = when (s.kidsLimit) { 0 -> 7; 7 -> 12; else -> 0 }
+                                when {
+                                    !repo.tmdb.enabled -> nav.toast("El perfil infantil necesita la clave de TMDB (Ajustes › Cuenta)")
+                                    s.kidsLimit == 0 && s.pin.isEmpty() -> { pendingKids = next; changingPin = true }
+                                    s.kidsLimit == 0 -> { repo.prefs.update { it.copy(kidsLimit = next) }; repo.startKidsPrep() }
+                                    else -> kidsPinFor = next
+                                }
+                            },
+                            value = when (s.kidsLimit) { 7 -> "Hasta 7 años"; 12 -> "Hasta 12 años"; else -> "Desactivado" },
+                        )
+                    }
                     item { Header("CONTENIDO PARA ADULTOS") }
                     item {
                         SettingRow("Ocultar contenido para adultos", "No aparece en Inicio, Novedades, el buscador, las categorías ni tus listas.",
@@ -178,6 +212,33 @@ fun SettingsScreen(onLogout: () -> Unit) {
                             value = if (s.tmdbKey.isNotBlank()) "Propia" else if (hasKey) "Incluida" else "Añadir",
                         )
                     }
+                    item { Header("COPIA EN LA NUBE (CUENTA DE TMDB)") }
+                    if (s.tmdbSession.isBlank()) {
+                        item {
+                            SettingRow(
+                                "Conectar tu cuenta de TMDB",
+                                "Guarda «Ver más adelante», Favoritos, Vistas y tus carpetas en tu cuenta. Si reinstalas o cambias de aparato, se recuperan.",
+                                onClick = { if (repo.tmdb.enabled) connecting = true else nav.toast("Primero añade la clave de TMDB") },
+                                value = "Conectar",
+                            )
+                        }
+                    } else {
+                        item {
+                            val last = if (s.lastCloudSync > 0) SimpleDateFormat("d MMM, HH:mm", Locale("es", "ES")).format(Date(s.lastCloudSync)) else "nunca"
+                            SettingRow(
+                                "Copiar ahora",
+                                cloudMsg ?: "Cuenta: ${s.tmdbUser.ifBlank { "conectada" }} · última copia: $last. Se hace sola cada 6 horas.",
+                                onClick = { if (!cloudRunning) repo.cloudSyncInBackground() },
+                                value = if (cloudRunning) "Copiando…" else "Copiar",
+                            )
+                        }
+                        item {
+                            SettingRow(
+                                "Desconectar la cuenta de TMDB", "Tus listas se quedan en este aparato y en tu cuenta de TMDB.",
+                                onClick = { repo.cloudDisconnect() }, value = "Desconectar",
+                            )
+                        }
+                    }
                     item {
                         SettingRow(
                             "Probar TMDB", tmdbTest ?: "Comprueba si la clave funciona y hay conexión.",
@@ -210,11 +271,24 @@ fun SettingsScreen(onLogout: () -> Unit) {
             PinDialog("Nuevo PIN", "Elige 4 cifras.", onDismiss = { changingPin = false }, onPin = { first = it; true })
         } else {
             PinDialog("Repite el PIN", "Vuelve a escribir las mismas 4 cifras.", onDismiss = { changingPin = false }, onPin = { pin ->
-                if (pin == first) { repo.prefs.update { it.copy(pin = pin) }; changingPin = false; true }
+                if (pin == first) {
+                    repo.prefs.update { it.copy(pin = pin) }; changingPin = false
+                    // Si veníamos de activar el perfil infantil, ahora sí se activa
+                    pendingKids?.let { k -> repo.prefs.update { it.copy(kidsLimit = k) }; repo.startKidsPrep(); pendingKids = null }
+                    true
+                }
                 else { first = null; false }
             })
         }
     }
+    kidsPinFor?.let { next ->
+        PinDialog("Escribe tu PIN", "Necesario para cambiar o quitar el perfil infantil.", onDismiss = { kidsPinFor = null }, onPin = { pin ->
+            val ok = pin == repo.prefs.value.pin
+            if (ok) { repo.prefs.update { it.copy(kidsLimit = next) }; kidsPinFor = null; if (next > 0) repo.startKidsPrep() }
+            ok
+        })
+    }
+    if (connecting) CloudConnectDialog(onDismiss = { connecting = false })
     if (editingKey) {
         TextInputDialog(
             "Clave de TMDB", "Pega o escribe la clave (deja vacío para usar la incluida)", s.tmdbKey,
@@ -289,3 +363,65 @@ private fun appVersion(): String = try {
     val ctx = ButacaApp.instance
     ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName ?: ""
 } catch (_: Exception) { "" }
+
+/** Código QR para abrir el enlace en el móvil. */
+private fun qrBitmap(text: String, size: Int = 480): androidx.compose.ui.graphics.ImageBitmap {
+    val m = com.google.zxing.qrcode.QRCodeWriter().encode(
+        text, com.google.zxing.BarcodeFormat.QR_CODE, size, size,
+        mapOf(com.google.zxing.EncodeHintType.MARGIN to 1),
+    )
+    val bmp = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888)
+    for (x in 0 until size) for (y in 0 until size) bmp.setPixel(x, y, if (m[x, y]) android.graphics.Color.BLACK else android.graphics.Color.WHITE)
+    return bmp.asImageBitmap()
+}
+
+/** Conectar la cuenta de TMDB: se aprueba desde el móvil escaneando el código. */
+@Composable
+private fun CloudConnectDialog(onDismiss: () -> Unit) {
+    val repo = ButacaApp.repo
+    val scope = rememberCoroutineScope()
+    var token by remember { mutableStateOf<String?>(null) }
+    var msg by remember { mutableStateOf<String?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        token = repo.cloudStart()
+        if (token == null) msg = "No se ha podido conectar con TMDB. Comprueba la clave en Ajustes › Cuenta."
+    }
+    app.butaca.tv.ui.components.AppDialog(onDismiss, width = 600) {
+        T("Conectar tu cuenta de TMDB", size = 22, weight = FontWeight.SemiBold)
+        T(
+            "1. Escanea el código con el móvil (o escribe la dirección en el navegador).\n" +
+                "2. Inicia sesión en TMDB y pulsa «Aprobar».\n" +
+                "3. Vuelve aquí y pulsa «Ya lo he aprobado».",
+            size = 14, color = C.TextSoft,
+        )
+        token?.let { t ->
+            val url = app.butaca.tv.data.approveUrl(t)
+            val qr = remember(url) { qrBitmap(url) }
+            Row(horizontalArrangement = Arrangement.spacedBy(20.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                androidx.compose.foundation.Image(qr, "Código QR", modifier = Modifier.size(170.dp))
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    T("O entra en:", size = 13, color = C.Muted)
+                    T(url, size = 14, weight = FontWeight.SemiBold, color = C.Accent)
+                }
+            }
+        }
+        msg?.let { T(it, size = 14, color = C.Red) }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp, androidx.compose.ui.Alignment.End)) {
+            app.butaca.tv.ui.components.ActionButton("Cancelar", null, onClick = onDismiss)
+            app.butaca.tv.ui.components.ActionButton(
+                if (busy) "Comprobando…" else "Ya lo he aprobado", null, primary = true,
+                onClick = {
+                    val t = token ?: return@ActionButton
+                    if (busy) return@ActionButton
+                    busy = true
+                    scope.launch {
+                        val err = repo.cloudFinish(t)
+                        busy = false
+                        if (err == null) onDismiss() else msg = err
+                    }
+                },
+            )
+        }
+    }
+}
