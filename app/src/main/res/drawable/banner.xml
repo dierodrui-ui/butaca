@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Banner de 320x180 que muestra Google TV en la fila de apps -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="320dp"
+    android:height="180dp"
+    android:viewportWidth="320"
+    android:viewportHeight="180">
+    <path android:fillColor="#FF0D1015" android:pathData="M0,0h320v180h-320z" />
+    <path android:fillColor="#FFFFB020" android:pathData="M126,58h68a10,10 0 0 1 10,10v44a10,10 0 0 1 -10,10h-68a10,10 0 0 1 -10,-10v-44a10,10 0 0 1 10,-10z" />
+    <path android:fillColor="#FF1A1200" android:pathData="M150,74v32l26,-16z" />
+</vector>

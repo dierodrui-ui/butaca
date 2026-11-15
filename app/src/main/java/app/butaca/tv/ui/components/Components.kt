@@ -1,0 +1,418 @@
+package app.butaca.tv.ui.components
+
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.tv.material3.Border
+import androidx.tv.material3.ClickableSurfaceDefaults
+import androidx.tv.material3.Icon
+import androidx.tv.material3.Surface
+import androidx.tv.material3.Text
+import app.butaca.tv.ui.C
+import app.butaca.tv.ui.Ic
+import coil.compose.AsyncImage
+
+/** Cualquier elemento que se puede seleccionar con el mando: borde ámbar al tener el foco. */
+@Composable
+fun FocusSurface(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    onLongClick: (() -> Unit)? = null,
+    radius: Dp = 12.dp,
+    focusedScale: Float = 1.04f,
+    container: Color = C.Surface2,
+    focusedContainer: Color = C.Raised,
+    content: Color = C.Text,
+    focusedContent: Color = C.Text,
+    borderWidth: Dp = 3.dp,
+    selectedBorder: Boolean = false,
+    body: @Composable BoxScope.() -> Unit,
+) {
+    val shape: Shape = RoundedCornerShape(radius)
+    Surface(
+        onClick = onClick,
+        onLongClick = onLongClick,
+        modifier = modifier,
+        shape = ClickableSurfaceDefaults.shape(shape = shape),
+        colors = ClickableSurfaceDefaults.colors(
+            containerColor = container,
+            contentColor = content,
+            focusedContainerColor = focusedContainer,
+            focusedContentColor = focusedContent,
+            pressedContainerColor = focusedContainer,
+            pressedContentColor = focusedContent,
+        ),
+        scale = ClickableSurfaceDefaults.scale(focusedScale = focusedScale),
+        border = ClickableSurfaceDefaults.border(
+            border = if (selectedBorder) Border(BorderStroke(1.5.dp, C.Border), shape = shape) else Border.None,
+            focusedBorder = Border(BorderStroke(borderWidth, C.Accent), inset = 0.dp, shape = shape),
+        ),
+        content = body,
+    )
+}
+
+@Composable
+fun T(
+    text: String,
+    modifier: Modifier = Modifier,
+    size: Int = 15,
+    weight: FontWeight = FontWeight.Normal,
+    color: Color = C.Text,
+    maxLines: Int = Int.MAX_VALUE,
+    lineHeight: Int? = null,
+) {
+    Text(
+        text = text,
+        modifier = modifier,
+        fontSize = size.sp,
+        fontWeight = weight,
+        color = color,
+        maxLines = maxLines,
+        overflow = TextOverflow.Ellipsis,
+        lineHeight = (lineHeight ?: (size * 1.35f).toInt()).sp,
+    )
+}
+
+@Composable
+fun SectionTitle(text: String, modifier: Modifier = Modifier, icon: ImageVector? = null, extra: String? = null) {
+    Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        if (icon != null) Icon(icon, null, tint = C.Accent, modifier = Modifier.size(20.dp))
+        T(text, size = 19, weight = FontWeight.SemiBold)
+        if (extra != null) T("· $extra", size = 13, color = C.Muted)
+    }
+}
+
+@Composable
+fun Pill(text: String, selected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier, small: Boolean = false) {
+    FocusSurface(
+        onClick = onClick,
+        modifier = modifier.height(if (small) 32.dp else 38.dp),
+        radius = 999.dp,
+        container = if (selected) C.Text else Color.Transparent,
+        focusedContainer = if (selected) C.Text else C.Raised,
+        content = if (selected) C.Bg else C.TextSoft,
+        focusedContent = if (selected) C.Bg else C.Text,
+        selectedBorder = !selected,
+        focusedScale = 1.05f,
+    ) {
+        T(
+            text, size = if (small) 13 else 14, weight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+            color = androidx.tv.material3.LocalContentColor.current,
+            modifier = Modifier.align(Alignment.Center).padding(horizontal = 14.dp),
+        )
+    }
+}
+
+@Composable
+fun ActionButton(
+    text: String,
+    icon: ImageVector?,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    primary: Boolean = false,
+    height: Dp = 50.dp,
+) {
+    FocusSurface(
+        onClick = onClick,
+        modifier = modifier.height(height),
+        radius = 12.dp,
+        container = if (primary) C.Text else C.Raised,
+        focusedContainer = if (primary) C.Text else C.Raised,
+        content = if (primary) C.Bg else C.Text,
+        focusedContent = if (primary) C.Bg else C.Text,
+        focusedScale = 1.05f,
+    ) {
+        Row(
+            Modifier.align(Alignment.Center).padding(horizontal = 20.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            if (icon != null) Icon(icon, null, modifier = Modifier.size(20.dp), tint = androidx.tv.material3.LocalContentColor.current)
+            T(text, size = 16, weight = FontWeight.SemiBold, color = androidx.tv.material3.LocalContentColor.current, maxLines = 1)
+        }
+    }
+}
+
+@Composable
+fun IconButtonTv(icon: ImageVector, description: String, onClick: () -> Unit, modifier: Modifier = Modifier, tint: Color = C.Text) {
+    FocusSurface(onClick = onClick, modifier = modifier.size(50.dp), radius = 12.dp, container = C.Raised, focusedScale = 1.08f) {
+        Icon(icon, description, tint = tint, modifier = Modifier.align(Alignment.Center).size(22.dp))
+    }
+}
+
+/** Imagen con un color de respaldo y el título encima si no hay carátula. */
+@Composable
+fun Artwork(url: String?, title: String, keySeed: String, modifier: Modifier = Modifier, showTitle: Boolean = true, titleSize: Int = 15) {
+    var failed by remember(url) { mutableStateOf(url.isNullOrBlank()) }
+    Box(modifier.background(C.toneFor(keySeed))) {
+        if (failed && showTitle) {
+            T(
+                title, size = titleSize, weight = FontWeight.SemiBold, maxLines = 4,
+                modifier = Modifier.align(Alignment.BottomStart).padding(12.dp),
+            )
+        }
+        if (!url.isNullOrBlank()) {
+            AsyncImage(
+                model = url,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+                onError = { failed = true },
+                onSuccess = { failed = false },
+            )
+        }
+    }
+}
+
+@Composable
+fun Badge(text: String, modifier: Modifier = Modifier, accent: Boolean = false) {
+    Box(
+        modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(if (accent) C.Accent else Color(0xD10D1015))
+            .padding(horizontal = 7.dp, vertical = 3.dp)
+    ) {
+        T(text, size = 10, weight = FontWeight.Bold, color = if (accent) C.OnAccent else C.Text)
+    }
+}
+
+/** Carátula vertical: películas y series. */
+@Composable
+fun PosterCard(
+    title: String,
+    icon: String?,
+    keySeed: String,
+    modifier: Modifier = Modifier,
+    width: Dp = 132.dp,
+    meta: String? = null,
+    isSeries: Boolean = false,
+    watched: Boolean = false,
+    unavailable: Boolean = false,
+    position: Int? = null,
+    highlighted: Boolean = false,
+    onClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
+) {
+    Column(modifier.width(width), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        FocusSurface(
+            onClick = onClick,
+            onLongClick = onLongClick,
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(2f / 3f)
+                .then(if (highlighted) Modifier.border(3.dp, C.Accent, RoundedCornerShape(10.dp)) else Modifier),
+            radius = 10.dp,
+            focusedScale = 1.07f,
+            container = Color.Transparent,
+            focusedContainer = Color.Transparent,
+        ) {
+            Artwork(icon, title, keySeed, Modifier.fillMaxSize().alpha(if (unavailable) 0.4f else 1f))
+            if (position != null) {
+                Box(
+                    Modifier.align(Alignment.TopStart).padding(7.dp).size(24.dp).clip(CircleShape).background(Color(0xD10D1015)),
+                    contentAlignment = Alignment.Center,
+                ) { T("$position", size = 12, weight = FontWeight.SemiBold) }
+            }
+            if (isSeries) Badge("SERIE", Modifier.align(Alignment.TopEnd).padding(7.dp))
+            if (watched) {
+                Box(
+                    Modifier.align(Alignment.BottomEnd).padding(7.dp).size(24.dp).clip(CircleShape).background(C.Green),
+                    contentAlignment = Alignment.Center,
+                ) { Icon(Ic.Check, "Vista", tint = C.Bg, modifier = Modifier.size(15.dp)) }
+            }
+        }
+        T(title, size = 13, weight = FontWeight.Medium, maxLines = 1, color = if (unavailable) C.Muted else C.Text)
+        if (meta != null) T(meta, size = 12, color = C.Muted, maxLines = 1)
+    }
+}
+
+/** Tarjeta horizontal: seguir viendo, episodios nuevos. */
+@Composable
+fun WideCard(
+    title: String,
+    subtitle: String,
+    image: String?,
+    keySeed: String,
+    modifier: Modifier = Modifier,
+    width: Dp = 240.dp,
+    progress: Float? = null,
+    badge: String? = null,
+    onClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
+) {
+    Column(modifier.width(width), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        FocusSurface(
+            onClick = onClick, onLongClick = onLongClick,
+            modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f),
+            radius = 12.dp, focusedScale = 1.05f, container = Color.Transparent, focusedContainer = Color.Transparent,
+        ) {
+            Artwork(image, title, keySeed, Modifier.fillMaxSize(), titleSize = 16)
+            Box(
+                Modifier.align(Alignment.Center).size(42.dp).clip(CircleShape).background(Color(0x8C0D1015)),
+                contentAlignment = Alignment.Center,
+            ) { Icon(Ic.Play, null, tint = C.Text, modifier = Modifier.size(18.dp)) }
+            if (badge != null) Badge(badge, Modifier.align(Alignment.TopStart).padding(10.dp), accent = true)
+            if (progress != null) {
+                Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(4.dp).background(Color(0x2EFFFFFF))) {
+                    Box(Modifier.fillMaxWidth(progress.coerceIn(0f, 1f)).height(4.dp).background(C.Accent))
+                }
+            }
+        }
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            T(title, size = 15, weight = FontWeight.SemiBold, maxLines = 1)
+            T(subtitle, size = 13, color = C.Muted, maxLines = 1)
+        }
+    }
+}
+
+/** Fila de ajustes: interruptor o valor que cambia al pulsar OK. */
+@Composable
+fun SettingRow(
+    label: String,
+    description: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    switch: Boolean? = null,
+    value: String? = null,
+) {
+    FocusSurface(
+        onClick = onClick,
+        modifier = modifier.fillMaxWidth(),
+        radius = 12.dp, focusedScale = 1.01f, container = C.Surface, focusedContainer = C.Surface3,
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(20.dp),
+        ) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                T(label, size = 15, weight = FontWeight.SemiBold)
+                T(description, size = 13, color = C.Muted)
+            }
+            if (switch != null) {
+                Box(
+                    Modifier.width(52.dp).height(30.dp).clip(RoundedCornerShape(999.dp))
+                        .background(if (switch) C.Accent else Color(0xFF3A4250)).padding(3.dp),
+                    contentAlignment = if (switch) Alignment.CenterEnd else Alignment.CenterStart,
+                ) { Box(Modifier.size(24.dp).clip(CircleShape).background(C.Text)) }
+            }
+            if (value != null) {
+                Row(
+                    Modifier.clip(RoundedCornerShape(10.dp)).background(C.Surface3)
+                        .border(1.5.dp, Color(0xFF3A4250), RoundedCornerShape(10.dp))
+                        .padding(start = 14.dp, end = 10.dp, top = 9.dp, bottom = 9.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    T(value, size = 14, weight = FontWeight.SemiBold, maxLines = 1)
+                    Icon(Ic.Chevron, null, tint = C.Text, modifier = Modifier.size(16.dp))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun MenuRow(
+    text: String,
+    icon: ImageVector?,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    trailing: String? = null,
+    iconTint: Color = C.Text,
+    selected: Boolean = false,
+    onLongClick: (() -> Unit)? = null,
+) {
+    FocusSurface(
+        onClick = onClick, onLongClick = onLongClick,
+        modifier = modifier.fillMaxWidth().height(48.dp),
+        radius = 10.dp, focusedScale = 1.02f,
+        container = if (selected) C.Raised else Color.Transparent,
+        focusedContainer = C.Raised,
+        content = if (selected) C.Text else C.TextSoft,
+    ) {
+        Row(
+            Modifier.fillMaxSize().padding(horizontal = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            if (icon != null) Icon(icon, null, tint = iconTint, modifier = Modifier.size(20.dp))
+            T(
+                text, size = 15, weight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                color = androidx.tv.material3.LocalContentColor.current, maxLines = 1, modifier = Modifier.weight(1f),
+            )
+            if (trailing != null) T(trailing, size = 13, color = C.Muted)
+        }
+    }
+}
+
+@Composable
+fun EmptyState(title: String, text: String, modifier: Modifier = Modifier) {
+    Column(
+        modifier.fillMaxWidth().padding(40.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        T(title, size = 18, weight = FontWeight.SemiBold)
+        T(text, size = 14, color = C.Muted)
+    }
+}
+
+@Composable
+fun Scrim(modifier: Modifier = Modifier) {
+    Box(
+        modifier.background(
+            Brush.horizontalGradient(
+                0f to Color(0xF20D1015), 0.45f to Color(0xB30D1015), 1f to Color(0x000D1015),
+            )
+        )
+    )
+}
+
+@Composable
+fun BottomFade(modifier: Modifier = Modifier) {
+    Box(modifier.background(Brush.verticalGradient(0f to Color(0x000D1015), 1f to C.Bg)))
+}
+
+@Suppress("unused")
+@Composable
+fun RowScope.Gap(w: Dp) = Spacer(Modifier.width(w))
+
+@Suppress("unused")
+val NoPadding = PaddingValues(0.dp)
