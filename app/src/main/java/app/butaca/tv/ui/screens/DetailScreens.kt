@@ -55,8 +55,8 @@ import app.butaca.tv.data.TmdbPerson
 import app.butaca.tv.data.TmdbEpisode
 import app.butaca.tv.data.setAlert
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.widthInRow
-import app.butaca.tv.data.Related
+import androidx.compose.foundation.layout.widthIn
+import app.butaca.tv.data.RelatedRow
 import androidx.compose.runtime.snapshotFlow
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
