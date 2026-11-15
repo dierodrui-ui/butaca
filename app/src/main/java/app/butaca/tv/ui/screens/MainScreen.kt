@@ -74,7 +74,7 @@ fun MainScreen(onLogout: () -> Unit) {
                     Tab.HOME -> HomeScreen(onGoFolders = { tab = Tab.FOLDERS })
                     Tab.SEARCH -> SearchScreen()
                     Tab.LIVE -> CatalogScreen(ContentType.LIVE)
-                    Tab.MOVIES -> CatalogScreen(ContentType.MOVIE)
+                    Tab.MOVIES -> MoviesScreen()
                     Tab.SERIES -> CatalogScreen(ContentType.SERIES)
                     Tab.FOLDERS -> FoldersScreen()
                     Tab.SETTINGS -> SettingsScreen(onLogout)

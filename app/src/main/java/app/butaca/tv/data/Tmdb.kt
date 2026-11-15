@@ -223,6 +223,25 @@ class TmdbClient(
         if (isTv) get("/tv/$id", mapOf("language" to "es-ES", "append_to_response" to "content_ratings"), ttlHours = 24 * 30)
         else get("/movie/$id", mapOf("language" to "es-ES", "append_to_response" to "release_dates"), ttlHours = 24 * 30)
 
+    fun popularity(d: JSONObject): Double? = d.optDouble("popularity").takeIf { !it.isNaN() }
+
+    fun language(d: JSONObject): String? = d.optString("original_language").ifBlank { null }
+
+    /** País de origen: el primero de origin_country o, si no, de las productoras. */
+    fun country(d: JSONObject): String? {
+        d.optJSONArray("origin_country")?.let { a -> if (a.length() > 0) return a.optString(0).ifBlank { null } }
+        d.optJSONArray("production_countries")?.let { a -> if (a.length() > 0) return a.optJSONObject(0)?.optString("iso_3166_1")?.ifBlank { null } }
+        return null
+    }
+
+    /** Lo más visto ahora mismo en un país. */
+    suspend fun popular(isTv: Boolean, region: String, pages: Int = 3): List<TmdbTitle> {
+        val out = ArrayList<TmdbTitle>()
+        val path = if (isTv) "/tv/popular" else "/movie/popular"
+        for (p in 1..pages) out += parseList(get(path, mapOf("language" to "es-ES", "region" to region, "page" to "$p"), ttlHours = 12)?.optJSONArray("results"), isTv)
+        return out
+    }
+
     fun genres(d: JSONObject): List<Pair<Int, String>> {
         val arr = d.optJSONArray("genres") ?: return emptyList()
         return (0 until arr.length()).mapNotNull { arr.optJSONObject(it) }.map { it.optInt("id") to it.optString("name") }

@@ -72,11 +72,16 @@ data class ItemEntity(
     val tmdbId: Int? = null,
     /** Edad recomendada (0, 7, 12, 16, 18) según TMDB; null si aún no se sabe. */
     val cert: Int? = null,
+    /** Popularidad en TMDB (para ordenar como las plataformas). */
+    val pop: Double? = null,
+    /** País de origen (ES, US…) e idioma original según TMDB. */
+    val country: String? = null,
+    val lang: String? = null,
 )
 
 data class Enrichment(
     val key: String, val genre: String?, val plot: String?, val backdrop: String?, val enriched: Int,
-    val tmdbId: Int?, val cert: Int?,
+    val tmdbId: Int?, val cert: Int?, val pop: Double?, val country: String?, val lang: String?,
 )
 
 /** Estreno que esperas: te avisamos cuando llegue a tu servidor. */
@@ -241,7 +246,7 @@ interface ItemDao {
     @RawQuery
     suspend fun raw(q: SupportSQLiteQuery): List<ItemEntity>
 
-    @Query("SELECT `key`, genre, plot, backdrop, enriched, tmdbId, cert FROM item WHERE type = :type AND enriched >= 1")
+    @Query("SELECT `key`, genre, plot, backdrop, enriched, tmdbId, cert, pop, country, lang FROM item WHERE type = :type AND enriched >= 1")
     suspend fun enrichments(type: String): List<Enrichment>
 
     @Query("UPDATE item SET genre = CASE WHEN enriched >= 2 THEN genre ELSE COALESCE(:genre, genre) END, plot = COALESCE(:plot, plot), backdrop = COALESCE(backdrop, :backdrop), enriched = MAX(enriched, 1) WHERE type = 'movie' AND streamId = :streamId")
@@ -250,9 +255,20 @@ interface ItemDao {
     /** Géneros de TMDB (mandan sobre los del servidor). */
     @Query(
         "UPDATE item SET genre = COALESCE(:genre, genre), plot = COALESCE(plot, :plot), backdrop = COALESCE(backdrop, :backdrop), " +
-            "tmdbId = COALESCE(:tmdbId, tmdbId), cert = COALESCE(:cert, cert), enriched = 2 WHERE stableKey = :stableKey"
+            "tmdbId = COALESCE(:tmdbId, tmdbId), cert = COALESCE(:cert, cert), pop = COALESCE(:pop, pop), country = COALESCE(:country, country), " +
+            "lang = COALESCE(:lang, lang), enriched = 2 WHERE stableKey = :stableKey"
     )
-    suspend fun enrichTmdb(stableKey: String, genre: String?, plot: String?, backdrop: String?, tmdbId: Int?, cert: Int?)
+    suspend fun enrichTmdb(
+        stableKey: String, genre: String?, plot: String?, backdrop: String?, tmdbId: Int?, cert: Int?,
+        pop: Double?, country: String?, lang: String?,
+    )
+
+    /** Películas o series ya identificadas en TMDB (para las filas por categorías). */
+    @Query("SELECT * FROM item WHERE type = :type AND isAdult = 0 AND tmdbId IS NOT NULL")
+    suspend fun identified(type: String): List<ItemEntity>
+
+    @Query("SELECT COUNT(*) FROM item WHERE type = :type AND isAdult = 0 AND tmdbId IS NULL AND enriched >= 2")
+    suspend fun unidentifiedCount(type: String): Int
 
     /** Marca como revisado aunque TMDB no lo conozca (para no preguntar en bucle). */
     @Query("UPDATE item SET enriched = 2 WHERE stableKey = :stableKey AND enriched < 2")
@@ -440,7 +456,7 @@ interface MiscDao {
         ProgressEntity::class, EpisodeProgressEntity::class, TrackedSeriesEntity::class, AudioPrefEntity::class,
         AlertEntity::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = false,
 )
 abstract class ButacaDb : RoomDatabase() {
@@ -453,9 +469,20 @@ abstract class ButacaDb : RoomDatabase() {
     companion object {
         fun create(context: Context): ButacaDb =
             Room.databaseBuilder(context, ButacaDb::class.java, "butaca.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                 .fallbackToDestructiveMigrationOnDowngrade()
                 .build()
+
+        /** v4: popularidad, país e idioma de TMDB (para ordenar el catálogo por categorías). */
+        private val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE item ADD COLUMN pop REAL")
+                db.execSQL("ALTER TABLE item ADD COLUMN country TEXT")
+                db.execSQL("ALTER TABLE item ADD COLUMN lang TEXT")
+                // Releer de TMDB lo ya identificado (va casi todo desde la caché, es rápido)
+                db.execSQL("UPDATE item SET enriched = 1 WHERE enriched = 2 AND tmdbId IS NOT NULL")
+            }
+        }
 
         /** v3: id de TMDB, edad recomendada y avisos de estrenos. */
         private val MIGRATION_2_3 = object : Migration(2, 3) {

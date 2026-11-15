@@ -238,7 +238,7 @@ class Repo(
                 if (e == null) it else it.copy(
                     genre = if (e.enriched >= 2) e.genre ?: it.genre else it.genre ?: e.genre,
                     plot = it.plot ?: e.plot, backdrop = it.backdrop ?: e.backdrop, enriched = e.enriched,
-                    tmdbId = e.tmdbId, cert = e.cert,
+                    tmdbId = e.tmdbId, cert = e.cert, pop = e.pop, country = e.country, lang = e.lang,
                 )
             }
             db.items().upsert(items)
@@ -529,7 +529,7 @@ class Repo(
             tmdb.genres(d).joinToString(", ") { it.second }.ifBlank { null },
             d.optString("overview").ifBlank { null },
             TmdbClient.img("w1280", d.optString("backdrop_path")),
-            id, tmdb.certification(d, isTv),
+            id, tmdb.certification(d, isTv), tmdb.popularity(d), tmdb.country(d), tmdb.language(d),
         )
     }
 
@@ -628,6 +628,7 @@ class Repo(
             db.items().enrichTmdb(
                 item.stableKey, genres.joinToString(", ") { it.second }.ifBlank { null }, d.optString("overview").ifBlank { null },
                 TmdbClient.img("w1280", d.optString("backdrop_path")), id, cert,
+                tmdb.popularity(d), tmdb.country(d), tmdb.language(d),
             )
 
             // ---- Mismo estilo, coherente ----
