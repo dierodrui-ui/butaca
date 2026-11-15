@@ -18,6 +18,7 @@ import android.app.Activity
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.ui.platform.LocalContext
 import app.butaca.tv.ui.components.ConfirmDialog
 import androidx.compose.runtime.LaunchedEffect
