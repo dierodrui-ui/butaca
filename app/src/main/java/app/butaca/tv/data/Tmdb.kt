@@ -315,6 +315,30 @@ class TmdbClient(
         parseList(d.optJSONObject("recommendations")?.optJSONArray("results"), isTv) +
             parseList(d.optJSONObject("similar")?.optJSONArray("results"), isTv)
 
+    /** Recomendaciones de TMDB («si te gustó esto…»), en su orden, varias páginas. */
+    suspend fun recommendationPages(isTv: Boolean, id: Int, d: JSONObject, pages: Int = 3): List<TmdbTitle> {
+        val out = ArrayList(parseList(d.optJSONObject("recommendations")?.optJSONArray("results"), isTv))
+        for (p in 2..pages) {
+            val arr = get("/${if (isTv) "tv" else "movie"}/$id/recommendations", mapOf("language" to "es-ES", "page" to p.toString()))
+                ?.optJSONArray("results") ?: break
+            if (arr.length() == 0) break
+            out += parseList(arr, isTv)
+        }
+        return out.distinctBy { it.id }
+    }
+
+    /** Títulos parecidos según TMDB, varias páginas. */
+    suspend fun similarPages(isTv: Boolean, id: Int, d: JSONObject, pages: Int = 2): List<TmdbTitle> {
+        val out = ArrayList(parseList(d.optJSONObject("similar")?.optJSONArray("results"), isTv))
+        for (p in 2..pages) {
+            val arr = get("/${if (isTv) "tv" else "movie"}/$id/similar", mapOf("language" to "es-ES", "page" to p.toString()))
+                ?.optJSONArray("results") ?: break
+            if (arr.length() == 0) break
+            out += parseList(arr, isTv)
+        }
+        return out.distinctBy { it.id }
+    }
+
     suspend fun collection(id: Int): List<TmdbTitle> =
         parseList(get("/collection/$id", mapOf("language" to "es-ES"))?.optJSONArray("parts"), forceTv = false)
             .sortedBy { it.year ?: 9999 }

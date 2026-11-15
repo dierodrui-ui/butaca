@@ -641,17 +641,25 @@ class Repo(
             val kwSet = byKeyword.map { it.id }.toSet()
             val sameLang = if (lang != null && lang != "en" && genreIds.isNotEmpty())
                 tmdb.discover(isTv, genreIds.take(1), 3, mapOf("with_original_language" to lang)) else emptyList()
-            val pool = (tmdb.recommendations(d, isTv) + byKeyword + sameLang + tmdb.discover(isTv, genreIds.take(2), 4))
+            // Lo que TMDB recomienda para este título manda: cuanto más arriba en su lista, más peso.
+            val recs = tmdb.recommendationPages(isTv, id, d, 3)
+            val sims = tmdb.similarPages(isTv, id, d, 2)
+            val recRank = recs.withIndex().associate { it.value.id to it.index }
+            val simRank = sims.withIndex().associate { it.value.id to it.index }
+            fun coherent(t: TmdbTitle) = t.genreIds.none { it in strong && it !in genreIds }
+            val pool = (recs + sims + byKeyword + sameLang + tmdb.discover(isTv, genreIds.take(2), 4))
                 .distinctBy { it.id to it.isTv }
                 .filter { t ->
-                    (genreIds.isEmpty() || t.genreIds.any { it in genreIds }) &&
-                        t.genreIds.none { it in strong && it !in genreIds }
+                    coherent(t) && (genreIds.isEmpty() || t.genreIds.isEmpty() || t.genreIds.any { it in genreIds })
                 }
                 .sortedByDescending { t ->
                     val shared = t.genreIds.count { it in genreIds }
                     val extra = t.genreIds.count { it !in genreIds }
-                    shared * 10.0 - extra * 3.0 +
-                        (if (lang != null && t.language == lang) 12.0 else 0.0) +
+                    val rec = recRank[t.id]?.let { 60.0 - it } ?: 0.0          // recomendaciones de TMDB
+                    val sim = simRank[t.id]?.let { 25.0 - it * 0.6 } ?: 0.0    // parecidos de TMDB
+                    rec + sim + (if (rec > 0 && sim > 0) 15.0 else 0.0) +
+                        shared * 6.0 - extra * 2.0 +
+                        (if (lang != null && t.language == lang) 10.0 else 0.0) +
                         (if (t.id in kwSet) 8.0 else 0.0) +
                         t.popularity / 1000.0
                 }
@@ -677,7 +685,7 @@ class Repo(
             director?.let { add(it.first, it.second) }
             studio?.let { add(it.first, it.second) }
             val label = genres.take(3).joinToString(", ") { it.second }
-            add(if (label.isBlank()) "Del mismo estilo" else "Del mismo estilo · $label", styleItems, 18)
+            add(if (label.isBlank()) "Te puede gustar" else "Te puede gustar · $label", styleItems, 20)
             cast.forEach { add(it.first, it.second) }
             Related(
                 rows, genres.map { it.second }, keywords.map { it.second }.take(10),
