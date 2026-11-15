@@ -268,12 +268,31 @@ fun PosterCard(
                     contentAlignment = Alignment.Center,
                 ) { Icon(Ic.Check, "Vista", tint = C.Bg, modifier = Modifier.size(15.dp)) }
             }
+            // Favorito y Ver más adelante
+            val marks = LocalMarks.current
+            val fav = keySeed in marks.fav
+            val later = keySeed in marks.later
+            if (fav || later) {
+                Row(Modifier.align(Alignment.BottomStart).padding(7.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    if (fav) Box(
+                        Modifier.size(24.dp).clip(CircleShape).background(Color(0xE60D1015)),
+                        contentAlignment = Alignment.Center,
+                    ) { Icon(Ic.HeartFilled, "Favorito", tint = C.Red, modifier = Modifier.size(14.dp)) }
+                    if (later) Box(
+                        Modifier.size(24.dp).clip(CircleShape).background(Color(0xE60D1015)),
+                        contentAlignment = Alignment.Center,
+                    ) { Icon(Ic.Clock, "Ver más adelante", tint = C.Accent, modifier = Modifier.size(14.dp)) }
+                }
+            }
         }
         Spacer(Modifier.height(2.dp))
         T(title, size = 13, weight = FontWeight.Medium, maxLines = 1, color = if (unavailable) C.Muted else C.Text)
         if (meta != null) T(meta, size = 11, color = C.Muted, maxLines = 1)
     }
 }
+
+/** Favoritos y Ver más adelante, disponibles en toda la app para marcar las carátulas. */
+val LocalMarks = androidx.compose.runtime.staticCompositionLocalOf { app.butaca.tv.data.Marks() }
 
 /** Tarjeta horizontal: seguir viendo, episodios nuevos. */
 @Composable

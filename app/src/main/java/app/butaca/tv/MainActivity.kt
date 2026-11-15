@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -145,7 +146,8 @@ fun AppRoot() {
         Density(density = w / 1280f, fontScale = 1f)
     }
 
-    CompositionLocalProvider(LocalNav provides appNav, LocalDensity provides tvDensity) {
+    val marks by remember { ButacaApp.repo.marks() }.collectAsState(initial = app.butaca.tv.data.Marks())
+    CompositionLocalProvider(LocalNav provides appNav, LocalDensity provides tvDensity, app.butaca.tv.ui.components.LocalMarks provides marks) {
         Box(Modifier.fillMaxSize().background(C.Bg)) {
             NavHost(navController = nav, startDestination = start) {
                 composable("login") {

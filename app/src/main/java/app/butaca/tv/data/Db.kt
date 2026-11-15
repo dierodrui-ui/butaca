@@ -297,6 +297,8 @@ interface ItemDao {
 
 data class KeyAdded(val key: String, val added: Long)
 
+data class KeyMark(val stableKey: String, val system: String)
+
 @Dao
 interface FolderDao {
     @Query("SELECT * FROM folder ORDER BY position, id")
@@ -325,6 +327,9 @@ interface FolderDao {
 
     @Query("SELECT * FROM folder_item WHERE folderId = :folderId ORDER BY position")
     suspend fun items(folderId: Long): List<FolderItemEntity>
+
+    @Query("SELECT fi.stableKey AS stableKey, f.system AS system FROM folder_item fi JOIN folder f ON f.id = fi.folderId WHERE f.system IN ('fav','later')")
+    fun observeMarks(): Flow<List<KeyMark>>
 
     @Query("SELECT folderId FROM folder_item WHERE stableKey = :stableKey")
     fun observeFoldersOf(stableKey: String): Flow<List<Long>>

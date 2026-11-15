@@ -793,6 +793,11 @@ class Repo(
 
     fun continueWatching(): Flow<List<ProgressEntity>> = db.progress().observeContinue()
     fun watched(): Flow<List<ProgressEntity>> = db.progress().observeWatched()
+    /** Títulos en Favoritos y en Ver más adelante, para marcarlos en las carátulas. */
+    fun marks(): Flow<Marks> = db.folders().observeMarks().map { l ->
+        Marks(l.filter { it.system == "fav" }.map { it.stableKey }.toSet(), l.filter { it.system == "later" }.map { it.stableKey }.toSet())
+    }
+
     fun watchedKeys(): Flow<Set<String>> = db.progress().observeWatchedKeys().map { it.toSet() }
     fun progressOf(stableKey: String): Flow<ProgressEntity?> = db.progress().observe(stableKey)
     fun episodeProgress(seriesKey: String): Flow<List<EpisodeProgressEntity>> = db.progress().observeEpisodes(seriesKey)
@@ -904,3 +909,5 @@ private fun <T, R> Flow<T>.mapLatestCompat(transform: suspend (T) -> R): Flow<R>
 
 @Suppress("unused")
 private fun <T> emptyFlow(): Flow<List<T>> = flowOf(emptyList())
+
+data class Marks(val fav: Set<String> = emptySet(), val later: Set<String> = emptySet())
