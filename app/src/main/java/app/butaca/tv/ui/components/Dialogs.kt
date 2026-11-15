@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -87,9 +88,12 @@ fun AppDialog(onDismiss: () -> Unit, width: Int = 460, content: @Composable Colu
                     }
                 }
                 .width(width.dp)
+                // Si el contenido no cabe en la pantalla, el cuadro se desplaza con el foco
+                .heightIn(max = 660.dp)
                 .clip(RoundedCornerShape(18.dp))
                 .background(C.Surface)
                 .border(1.dp, C.Border, RoundedCornerShape(18.dp))
+                .verticalScroll(androidx.compose.foundation.rememberScrollState())
                 .padding(24.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
             content = content,

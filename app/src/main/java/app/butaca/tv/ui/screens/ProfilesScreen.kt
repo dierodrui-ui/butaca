@@ -260,6 +260,11 @@ fun ProfileEditor(p: ProfileEntity, onDismiss: () -> Unit, onSave: (ProfileEntit
                 T(if (d.kid) "Perfil infantil: solo contenido para su edad" else "Perfil de adulto", size = 13, color = C.Muted)
             }
         }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End)) {
+            if (p.id != 0L && p.id != 1L) ActionButton("Eliminar", Ic.Trash, onClick = { confirmDelete = true })
+            ActionButton("Cancelar", null, onClick = onDismiss)
+            ActionButton("Guardar", Ic.Check, onClick = { if (d.name.isNotBlank()) onSave(d) else naming = true }, primary = true)
+        }
         MenuRow("Nombre", Ic.Edit, onClick = { naming = true }, trailing = d.name.ifBlank { "Escribe un nombre" })
         MenuRow("Color", null, onClick = { d = d.copy(color = next(PROFILE_COLORS, d.color)) }, trailing = "Cambiar")
         MenuRow("Tipo de perfil", null, onClick = { d = d.copy(kid = !d.kid) }, trailing = if (d.kid) "Infantil" else "Adulto")
@@ -269,11 +274,6 @@ fun ProfileEditor(p: ProfileEntity, onDismiss: () -> Unit, onSave: (ProfileEntit
             MenuRow("Consejos animados", null, onClick = { d = d.copy(adsEvery = next(ADS_OPTIONS, d.adsEvery)) }, trailing = if (d.adsEvery <= 0) "Nunca" else "Cada ${d.adsEvery} min")
             MenuRow("Consejos en la esquina", null, onClick = { d = d.copy(tips = !d.tips) }, trailing = if (d.tips) "Sí" else "No")
             MenuRow("Nombres de papá y mamá", null, onClick = { naming = false; editingParents = true }, trailing = settings.parentsNames)
-        }
-        Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End)) {
-            if (p.id != 0L && p.id != 1L) ActionButton("Eliminar", Ic.Trash, onClick = { confirmDelete = true })
-            ActionButton("Cancelar", null, onClick = onDismiss)
-            ActionButton("Guardar", Ic.Check, onClick = { if (d.name.isNotBlank()) onSave(d) else naming = true }, primary = true)
         }
     }
     if (naming) TextInputDialog("Nombre del perfil", "Por ejemplo: Lucía", d.name, onDismiss = { naming = false }, onDone = { d = d.copy(name = it); naming = false })
