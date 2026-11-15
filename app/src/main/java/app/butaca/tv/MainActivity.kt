@@ -78,16 +78,46 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         ButacaApp.repo.checkIdleLock()
         ButacaApp.repo.syncIfNeeded()
+        ButacaApp.repo.usageResume()
     }
 
     override fun onStop() {
         super.onStop()
         ButacaApp.repo.onAppStopped()
+        ButacaApp.repo.usagePause()
     }
 }
 
+/** Entrada: acceso al servidor → «¿Quién está ahí?» → la app del perfil elegido. */
 @Composable
 fun AppRoot() {
+    val repo = ButacaApp.repo
+    val context = LocalContext.current
+    val settings by repo.prefs.flow.collectAsState()
+    val profile by repo.profile.collectAsState()
+    val timeUp by repo.timeUp.collectAsState()
+    var intro by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(repo.prefs.value.intro) }
+    val metrics = context.resources.displayMetrics
+    val tvDensity = remember(metrics.widthPixels, metrics.heightPixels) {
+        Density(density = maxOf(metrics.widthPixels, metrics.heightPixels) / 1280f, fontScale = 1f)
+    }
+    CompositionLocalProvider(LocalDensity provides tvDensity) {
+        Box(Modifier.fillMaxSize().background(C.Bg)) {
+            val p = profile
+            when {
+                !settings.loggedIn -> LoginScreen(onLoggedIn = { repo.syncInBackground() })
+                p == null -> app.butaca.tv.ui.screens.ProfilePickerScreen()
+                else -> androidx.compose.runtime.key(p.id) { ProfileRoot() }
+            }
+            if (timeUp) app.butaca.tv.ui.screens.TimeUpOverlay(profile?.name ?: "", onDone = { repo.leaveProfile(); repo.clearTimeUp() })
+            if (intro) app.butaca.tv.ui.screens.IntroScreen(onDone = { intro = false })
+        }
+    }
+}
+
+/** La app de un perfil: navegación entre pantallas. */
+@Composable
+fun ProfileRoot() {
     val repo = ButacaApp.repo
     val nav = rememberNavController()
     val context = LocalContext.current
@@ -139,7 +169,7 @@ fun AppRoot() {
         )
     }
 
-    val start = if (repo.prefs.value.loggedIn) "main" else "login"
+    val start = "main"
 
     // Todo se dibuja como en el diseño: una pantalla de 1280 de ancho, sea cual sea la tele
     val metrics = context.resources.displayMetrics
@@ -152,17 +182,8 @@ fun AppRoot() {
     CompositionLocalProvider(LocalNav provides appNav, LocalDensity provides tvDensity, app.butaca.tv.ui.components.LocalMarks provides marks) {
         Box(Modifier.fillMaxSize().background(C.Bg)) {
             NavHost(navController = nav, startDestination = start) {
-                composable("login") {
-                    LoginScreen(onLoggedIn = {
-                        repo.syncInBackground()
-                        nav.navigate("main") { popUpTo("login") { inclusive = true } }
-                    })
-                }
                 composable("main") {
-                    MainScreen(onLogout = {
-                        repo.logout()
-                        nav.navigate("login") { popUpTo("main") { inclusive = true } }
-                    })
+                    MainScreen(onLogout = { repo.leaveProfile(); repo.logout() })
                 }
                 composable("movie/{key}", arguments = listOf(navArgument("key") { type = NavType.StringType })) { e ->
                     MovieScreen(Uri.decode(e.arguments?.getString("key") ?: ""), onBack = { nav.popBackStack() })
@@ -188,9 +209,7 @@ fun AppRoot() {
             menu?.let { m ->
                 QuickMenu(m, onOpen = { appNav.openRef(it) }, onDismiss = { menu = null })
             }
-            // Intro de cine al abrir la app (solo al arrancar)
-            var intro by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(repo.prefs.value.intro) }
-            if (intro) app.butaca.tv.ui.screens.IntroScreen(onDone = { intro = false })
+            app.butaca.tv.ui.screens.KidTimeWarning()
         }
     }
 }

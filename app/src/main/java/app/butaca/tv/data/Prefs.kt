@@ -36,6 +36,11 @@ data class Settings(
     val tmdbUser: String = "",
     // Orden y categorías ocultas de «Películas por categorías de TMDB» (ids separados por comas)
     val hubOrder: String = "",
+    // Perfiles
+    val lastProfile: Long = 1L,
+    val profilesReady: Boolean = false,
+    val parentsNames: String = "Diego y Chari",
+    val lockAdults: Boolean = false,              // pedir PIN para entrar en perfiles de adulto   // para el consejo «haz caso a tus padres»
     val hubHidden: String = "",
     val tmdbLists: String = "",      // "folderId:listId,folderId:listId"
     val lastCloudSync: Long = 0L,
@@ -77,6 +82,10 @@ class Prefs(context: Context) {
         tmdbUser = sp.getString("tmdbUser", "") ?: "",
         tmdbLists = sp.getString("tmdbLists", "") ?: "",
         hubOrder = sp.getString("hubOrder", "") ?: "",
+        lastProfile = sp.getLong("lastProfile", 1L),
+        profilesReady = sp.getBoolean("profilesReady", false),
+        parentsNames = sp.getString("parentsNames", "Diego y Chari") ?: "Diego y Chari",
+        lockAdults = sp.getBoolean("lockAdults", false),
         hubHidden = sp.getString("hubHidden", "") ?: "",
         lastCloudSync = sp.getLong("lastCloudSync", 0L),
     )
@@ -111,6 +120,10 @@ class Prefs(context: Context) {
             .putString("tmdbUser", s.tmdbUser)
             .putString("tmdbLists", s.tmdbLists)
             .putString("hubOrder", s.hubOrder)
+            .putLong("lastProfile", s.lastProfile)
+            .putBoolean("profilesReady", s.profilesReady)
+            .putString("parentsNames", s.parentsNames)
+            .putBoolean("lockAdults", s.lockAdults)
             .putString("hubHidden", s.hubHidden)
             .putLong("lastCloudSync", s.lastCloudSync)
             .apply()

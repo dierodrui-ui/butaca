@@ -14,6 +14,8 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
+import app.butaca.tv.ButacaApp
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -87,7 +89,136 @@ class Repo(
     val client: XtreamClient,
     val prefs: Prefs,
     val tmdb: TmdbClient,
+    private val userDbFor: (Long) -> UserDb,
 ) {
+    // ----- Perfiles -----
+    private val userDbs = HashMap<Long, UserDb>()
+    /** Datos del perfil que está viendo (carpetas, progreso, historial…). */
+    @Volatile var user: UserDb = userDb(prefs.value.lastProfile)
+        private set
+    private val _profile = MutableStateFlow<ProfileEntity?>(null)
+    val profile: StateFlow<ProfileEntity?> = _profile.asStateFlow()
+
+    private fun userDb(id: Long): UserDb = synchronized(userDbs) { userDbs.getOrPut(id) { userDbFor(id) } }
+
+    /** Edad máxima del contenido para el perfil actual (0 = sin límite). */
+    val kidsLimit: Int get() = _profile.value?.let { if (it.kid) it.kidsLimit.coerceAtLeast(3) else 0 } ?: 0
+    val isKid: Boolean get() = _profile.value?.kid == true
+
+    fun profiles(): Flow<List<ProfileEntity>> = db.profiles().observe()
+
+    suspend fun selectProfile(p: ProfileEntity) {
+        usagePause()
+        user = userDb(p.id)
+        _adultUnlocked.value = false
+        _profile.value = p
+        prefs.update { it.copy(lastProfile = p.id) }
+        resetProfileCaches()
+        usageResume()
+        if (p.kid) startKidsPrep()
+    }
+
+    fun leaveProfile() { usagePause(); _profile.value = null }
+
+    suspend fun saveProfile(p: ProfileEntity): Long {
+        val id = if (p.id == 0L) db.profiles().insert(p.copy(position = db.profiles().all().size, createdAt = System.currentTimeMillis()))
+        else { db.profiles().update(p); p.id }
+        if (_profile.value?.id == id) _profile.value = db.profiles().get(id)
+        if (p.kid) startKidsPrep()
+        return id
+    }
+
+    suspend fun deleteProfile(id: Long) {
+        if (id == 1L) return   // el principal no se borra
+        db.profiles().delete(id)
+        synchronized(userDbs) { userDbs.remove(id)?.close() }
+        ButacaApp.instance.deleteDatabase(UserDb.fileName(id))
+    }
+
+    // ----- Tiempo de uso y temporizador infantil -----
+    private var usageFrom = 0L
+    private val _timeUp = MutableStateFlow(false)
+    /** Se ha agotado el tiempo del perfil infantil (la app lo echa al selector). */
+    val timeUp: StateFlow<Boolean> = _timeUp.asStateFlow()
+    private var ticker: Job? = null
+
+    private fun today() = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date())
+
+    fun usageResume() {
+        if (_profile.value == null) return
+        usageFrom = System.currentTimeMillis()
+        if (ticker?.isActive != true) ticker = scope.launch {
+            while (true) { delay(15_000); flushUsage() }
+        }
+    }
+
+    fun usagePause() {
+        ticker?.cancel(); ticker = null
+        val from = usageFrom
+        usageFrom = 0L
+        val p = _profile.value ?: return
+        if (from > 0) { val ms = System.currentTimeMillis() - from; scope.launch { addUsage(p, ms) } }
+    }
+
+    private suspend fun flushUsage() {
+        val p = _profile.value ?: return
+        val from = usageFrom
+        if (from <= 0) return
+        val now = System.currentTimeMillis()
+        usageFrom = now
+        addUsage(p, now - from)
+    }
+
+    private suspend fun addUsage(p: ProfileEntity, ms: Long) {
+        if (ms <= 0 || ms > 6 * 3600_000L) return
+        val st = userDb(p.id).stats()
+        val day = today()
+        val u = st.usage(day) ?: UsageDayEntity(day, 0, 0)
+        st.upsertUsage(u.copy(appMs = u.appMs + ms))
+        // Temporizador de los perfiles infantiles
+        if (p.kid && p.timerMin > 0 && !p.timerExpired) {
+            val cur = db.profiles().get(p.id) ?: return
+            val used = cur.timerUsedMs + ms
+            val expired = used >= cur.timerMin * 60_000L
+            db.profiles().setTimer(p.id, used, expired)
+            val fresh = db.profiles().get(p.id)
+            if (_profile.value?.id == p.id) _profile.value = fresh
+            if (expired && _profile.value?.id == p.id) _timeUp.value = true
+        }
+    }
+
+    /** Minutos que le quedan al perfil infantil (null si no tiene temporizador). */
+    fun minutesLeft(p: ProfileEntity? = _profile.value): Int? {
+        if (p == null || !p.kid || p.timerMin <= 0) return null
+        val live = if (usageFrom > 0 && p.id == _profile.value?.id) System.currentTimeMillis() - usageFrom else 0L
+        return (((p.timerMin * 60_000L) - p.timerUsedMs - live) / 60_000L).toInt().coerceAtLeast(0)
+    }
+
+    fun clearTimeUp() { _timeUp.value = false }
+
+    /** Un adulto (con PIN) da más tiempo: el contador vuelve a empezar. */
+    suspend fun resetTimer(id: Long, minutes: Int) {
+        val p = db.profiles().get(id) ?: return
+        db.profiles().update(p.copy(timerMin = minutes, timerUsedMs = 0, timerExpired = false))
+        if (_profile.value?.id == id) _profile.value = db.profiles().get(id)
+        _timeUp.value = false
+    }
+
+    /** Historial: suma lo que se ha visto de un título hoy. */
+    suspend fun logWatch(stableKey: String, type: String, title: String, icon: String?, subtitle: String?, ms: Long) {
+        if (ms <= 0 || _profile.value == null) return
+        val st = user.stats()
+        val day = today()
+        val now = System.currentTimeMillis()
+        val l = st.log(day, stableKey)
+        st.upsertLog(
+            (l ?: WatchLogEntity(day, stableKey, type, title, icon, subtitle, 0, now))
+                .copy(watchedMs = (l?.watchedMs ?: 0) + ms, lastAt = now, subtitle = subtitle ?: l?.subtitle, title = title, icon = icon ?: l?.icon)
+        )
+        val u = st.usage(day) ?: UsageDayEntity(day, 0, 0)
+        st.upsertUsage(u.copy(watchMs = u.watchMs + ms))
+    }
+
     internal val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val syncMutex = Mutex()
 
@@ -100,9 +231,9 @@ class Repo(
     private var unlockedAt = 0L
 
     /** Mostrar adultos ahora mismo (ajuste desactivado o desbloqueado con PIN). */
-    val showAdult: Flow<Boolean> = combine(prefs.flow, adultUnlocked) { s, u -> !s.adultHide || u }
+    val showAdult: Flow<Boolean> = combine(prefs.flow, adultUnlocked, profile) { s, u, p -> p?.kid != true && (!s.adultHide || u) }
 
-    fun showAdultNow(): Boolean = !prefs.value.adultHide || _adultUnlocked.value
+    fun showAdultNow(): Boolean = !isKid && (!prefs.value.adultHide || _adultUnlocked.value)
 
     fun unlockAdult(pin: String): Boolean {
         if (prefs.value.pin.isNotEmpty() && pin == prefs.value.pin) {
@@ -318,21 +449,21 @@ class Repo(
     // ----- Series seguidas: avisar de episodios nuevos -----
     suspend fun refreshTrackedSeries() {
         val a = account() ?: return
-        val keys = (db.folders().seriesInFolders() + db.progress().seriesKeys()).distinct()
+        val keys = (user.folders().seriesInFolders() + user.progress().seriesKeys()).distinct()
         for (k in keys) {
             val item = db.items().byStableKey(k).firstOrNull() ?: continue
-            val tracked = db.misc().tracked(k)
+            val tracked = user.tracked().tracked(k)
             if (tracked != null && tracked.lastModified == item.added && tracked.seriesId == item.streamId) continue
             val info = try { client.seriesInfo(a, item.streamId) } catch (e: Exception) { null } ?: continue
             val eps = info.episodes.size
             val seasons = info.seasons.size
             if (tracked == null) {
-                db.misc().upsertTracked(
+                user.tracked().upsertTracked(
                     TrackedSeriesEntity(k, item.streamId, eps, seasons, 0, false, item.added, item.name, item.icon)
                 )
             } else {
                 val newEps = (eps - tracked.knownEpisodes).coerceAtLeast(0)
-                db.misc().upsertTracked(
+                user.tracked().upsertTracked(
                     tracked.copy(
                         seriesId = item.streamId,
                         newEpisodes = tracked.newEpisodes + newEps,
@@ -349,12 +480,12 @@ class Repo(
     }
 
     suspend fun markSeriesSeen(stableKey: String, info: SeriesInfo, item: ItemEntity) {
-        val t = db.misc().tracked(stableKey)
+        val t = user.tracked().tracked(stableKey)
         if (t == null) {
-            db.misc().upsertTracked(
+            user.tracked().upsertTracked(
                 TrackedSeriesEntity(stableKey, item.streamId, info.episodes.size, info.seasons.size, 0, false, item.added, item.name, item.icon)
             )
-        } else db.misc().markSeen(stableKey, info.episodes.size, info.seasons.size)
+        } else user.tracked().markSeen(stableKey, info.episodes.size, info.seasons.size)
     }
 
     // ----- Perfil infantil -----
@@ -362,7 +493,7 @@ class Repo(
 
     /** ¿Se puede ver con el perfil infantil activo? Lo que no tiene edad conocida queda fuera. */
     fun kidsOk(item: ItemEntity): Boolean {
-        val limit = prefs.value.kidsLimit
+        val limit = kidsLimit
         if (limit <= 0) return true
         if (item.isAdult) return false
         if (item.type == ContentType.LIVE) return true   // los canales se filtran por categoría
@@ -373,7 +504,7 @@ class Repo(
     // ----- Consultas -----
     @OptIn(ExperimentalCoroutinesApi::class)
     fun categories(type: String): Flow<List<CategoryEntity>> =
-        prefs.flow.map { it.kidsLimit }.distinctUntilChanged().flatMapLatestCompat { limit ->
+        profile.map { kidsLimit }.distinctUntilChanged().flatMapLatestCompat { limit ->
             if (limit <= 0) combine(db.categories().observe(type), showAdult) { list, adult ->
                 list.filter { !it.hidden && (adult || !it.isAdult) }
             } else if (type == ContentType.LIVE) db.categories().observe(type).map { list ->
@@ -414,7 +545,7 @@ class Repo(
         group.filter { it.quality <= max }.maxByOrNull { it.quality } ?: group.minBy { it.quality }
 
     fun recent(type: String, limit: Int = 60): Flow<List<ItemEntity>> =
-        showAdult.flatMapLatestCompat { adult -> db.items().observeRecent(type, adult, if (prefs.value.kidsLimit > 0) limit * 6 else limit) }
+        showAdult.flatMapLatestCompat { adult -> db.items().observeRecent(type, adult, if (kidsLimit > 0) limit * 6 else limit) }
             .map { l -> collapseVariants(l.filter { kidsOk(it) }, type).take(limit) }
 
     /**
@@ -456,7 +587,7 @@ class Repo(
     /** Novedades para el carrusel: sin adultos y sin lo que ya has visto. */
     fun novedades(): Flow<List<ItemEntity>> {
         val since = System.currentTimeMillis() / 1000 - 14 * 24 * 3600
-        return combine(db.items().observeNew(since), db.progress().observeWatchedKeys(), db.misc().observeNewEpisodes()) { list, watched, tracked ->
+        return combine(db.items().observeNew(since), user.progress().observeWatchedKeys(), user.tracked().observeNewEpisodes()) { list, watched, tracked ->
             val watchedSet = watched.toSet()
             val trackedKeys = tracked.map { it.stableKey }.toSet()
             val seen = HashSet<String>()
@@ -718,45 +849,45 @@ class Repo(
 
     // ----- Carpetas -----
     suspend fun ensureSystemFolders() {
-        val dao = db.folders()
+        val dao = user.folders()
         if (dao.systemFolder("later") == null) dao.insertFolder(FolderEntity(name = "Ver más adelante", color = 0xFFE8344B, position = -2, system = "later"))
         if (dao.systemFolder("fav") == null) dao.insertFolder(FolderEntity(name = "Favoritos", color = 0xFFE8344B, position = -1, system = "fav"))
         // Con la nueva imagen, las dos listas fijas van en el rojo de la app
         if (!systemColorsDone) { dao.setSystemColor(0xFFE8344B); systemColorsDone = true }
     }
 
-    fun folders(): Flow<List<FolderEntity>> = db.folders().observeFolders()
-    fun folderCounts(): Flow<Map<Long, Int>> = db.folders().observeCounts().map { l -> l.associate { it.folderId to it.total } }
-    fun foldersOf(stableKey: String): Flow<Set<Long>> = db.folders().observeFoldersOf(stableKey).map { it.toSet() }
+    fun folders(): Flow<List<FolderEntity>> = user.folders().observeFolders()
+    fun folderCounts(): Flow<Map<Long, Int>> = user.folders().observeCounts().map { l -> l.associate { it.folderId to it.total } }
+    fun foldersOf(stableKey: String): Flow<Set<Long>> = user.folders().observeFoldersOf(stableKey).map { it.toSet() }
 
     suspend fun systemFolderId(system: String): Long {
         ensureSystemFolders()
-        return db.folders().systemFolder(system)!!.id
+        return user.folders().systemFolder(system)!!.id
     }
 
     /** Contenido de una carpeta, resolviendo si sigue existiendo en el servidor. */
     @OptIn(ExperimentalCoroutinesApi::class)
     fun folderContent(folderId: Long): Flow<List<ContentRef>> =
-        combine(db.folders().observeItems(folderId), showAdult) { items, adult -> items to adult }
+        combine(user.folders().observeItems(folderId), showAdult) { items, adult -> items to adult }
             .mapLatestCompat { (items, adult) ->
                 val found = items.map { it.stableKey }.chunked(500).flatMap { db.items().byStableKeys(it) }
                 val byKey = found.groupBy { it.stableKey }
                 items.mapNotNull { fi ->
                     val best = byKey[fi.stableKey]?.let { pickBest(it, prefs.value.maxQuality) }
                     if (best != null && ((best.isAdult && !adult) || !kidsOk(best))) null
-                    else if (best == null && prefs.value.kidsLimit > 0) null
+                    else if (best == null && kidsLimit > 0) null
                     else fi.toRef(best?.key).copy(icon = best?.icon ?: fi.icon)
                 }
             }
 
     suspend fun addToFolder(folderId: Long, ref: ContentRef) {
-        val min = db.folders().minPosition(folderId)
-        db.folders().insertItem(
+        val min = user.folders().minPosition(folderId)
+        user.folders().insertItem(
             FolderItemEntity(folderId, ref.stableKey, ref.type, ref.title, ref.icon, ref.year, ref.rating, min - 1, System.currentTimeMillis())
         )
     }
 
-    suspend fun removeFromFolder(folderId: Long, stableKey: String) = db.folders().removeItem(folderId, stableKey)
+    suspend fun removeFromFolder(folderId: Long, stableKey: String) = user.folders().removeItem(folderId, stableKey)
 
     suspend fun toggleFolder(folderId: Long, ref: ContentRef, inFolder: Boolean) {
         if (inFolder) removeFromFolder(folderId, ref.stableKey) else addToFolder(folderId, ref)
@@ -766,32 +897,32 @@ class Repo(
         toggleFolder(systemFolderId(system), ref, inFolder)
 
     suspend fun createFolder(name: String, color: Long): Long {
-        val pos = db.folders().maxFolderPosition() + 1
-        return db.folders().insertFolder(FolderEntity(name = name.trim().ifBlank { "Carpeta" }, color = color, position = pos))
+        val pos = user.folders().maxFolderPosition() + 1
+        return user.folders().insertFolder(FolderEntity(name = name.trim().ifBlank { "Carpeta" }, color = color, position = pos))
     }
 
-    suspend fun updateFolder(id: Long, name: String, color: Long) = db.folders().updateFolder(id, name, color)
+    suspend fun updateFolder(id: Long, name: String, color: Long) = user.folders().updateFolder(id, name, color)
 
     suspend fun deleteFolder(id: Long) {
-        db.folders().clearFolder(id)
-        db.folders().deleteFolder(id)
+        user.folders().clearFolder(id)
+        user.folders().deleteFolder(id)
     }
 
     /** Mueve un título dentro de la carpeta (delta negativo = hacia delante). */
     suspend fun moveInFolder(folderId: Long, stableKey: String, delta: Int) {
-        val items = db.folders().items(folderId).toMutableList()
+        val items = user.folders().items(folderId).toMutableList()
         val idx = items.indexOfFirst { it.stableKey == stableKey }
         if (idx < 0) return
         val target = (idx + delta).coerceIn(0, items.size - 1)
         if (target == idx) return
         val it = items.removeAt(idx)
         items.add(target, it)
-        db.folders().upsertItems(items.mapIndexed { i, f -> f.copy(position = i) })
+        user.folders().upsertItems(items.mapIndexed { i, f -> f.copy(position = i) })
     }
 
     // ----- Progreso y vistas -----
-    fun continueRefs(): Flow<List<ContentRef>> = db.progress().observeContinue().mapLatestCompat { resolveProgress(it) }
-    fun watchedRefs(): Flow<List<ContentRef>> = db.progress().observeWatched().mapLatestCompat { resolveProgress(it) }
+    fun continueRefs(): Flow<List<ContentRef>> = user.progress().observeContinue().mapLatestCompat { resolveProgress(it) }
+    fun watchedRefs(): Flow<List<ContentRef>> = user.progress().observeWatched().mapLatestCompat { resolveProgress(it) }
 
     private suspend fun resolveProgress(list: List<ProgressEntity>): List<ContentRef> {
         val found = list.map { it.stableKey }.chunked(500).flatMap { db.items().byStableKeys(it) }.groupBy { it.stableKey }
@@ -799,27 +930,27 @@ class Repo(
         return list.mapNotNull { p ->
             val best = found[p.stableKey]?.let { pickBest(it, prefs.value.maxQuality) }
             if (best != null && ((best.isAdult && !adult) || !kidsOk(best))) null
-            else if (best == null && prefs.value.kidsLimit > 0) null
+            else if (best == null && kidsLimit > 0) null
             else ContentRef(p.stableKey, p.type, p.title, best?.icon ?: p.icon, best?.year, best?.rating, best?.key, p.updatedAt)
         }
     }
 
-    fun continueWatching(): Flow<List<ProgressEntity>> = db.progress().observeContinue()
-    fun watched(): Flow<List<ProgressEntity>> = db.progress().observeWatched()
+    fun continueWatching(): Flow<List<ProgressEntity>> = user.progress().observeContinue()
+    fun watched(): Flow<List<ProgressEntity>> = user.progress().observeWatched()
     /** Títulos en Favoritos y en Ver más adelante, para marcarlos en las carátulas. */
-    fun marks(): Flow<Marks> = db.folders().observeMarks().map { l ->
+    fun marks(): Flow<Marks> = user.folders().observeMarks().map { l ->
         Marks(l.filter { it.system == "fav" }.map { it.stableKey }.toSet(), l.filter { it.system == "later" }.map { it.stableKey }.toSet())
     }
 
-    fun watchedKeys(): Flow<Set<String>> = db.progress().observeWatchedKeys().map { it.toSet() }
-    fun progressOf(stableKey: String): Flow<ProgressEntity?> = db.progress().observe(stableKey)
-    fun episodeProgress(seriesKey: String): Flow<List<EpisodeProgressEntity>> = db.progress().observeEpisodes(seriesKey)
-    fun newEpisodes(): Flow<List<TrackedSeriesEntity>> = db.misc().observeNewEpisodes()
+    fun watchedKeys(): Flow<Set<String>> = user.progress().observeWatchedKeys().map { it.toSet() }
+    fun progressOf(stableKey: String): Flow<ProgressEntity?> = user.progress().observe(stableKey)
+    fun episodeProgress(seriesKey: String): Flow<List<EpisodeProgressEntity>> = user.progress().observeEpisodes(seriesKey)
+    fun newEpisodes(): Flow<List<TrackedSeriesEntity>> = user.tracked().observeNewEpisodes()
 
     suspend fun saveMovieProgress(item: PlayItem, positionMs: Long, durationMs: Long) {
         if (durationMs <= 0) return
         val finished = positionMs >= durationMs * 0.92
-        db.progress().upsert(
+        user.progress().upsert(
             ProgressEntity(item.stableKey, item.type, item.title, item.icon, positionMs, durationMs, System.currentTimeMillis(), finished)
         )
         if (finished) onFinished(item.stableKey)
@@ -831,9 +962,9 @@ class Repo(
         val epId = item.episodeId ?: return
         if (durationMs <= 0) return
         val finished = positionMs >= durationMs * 0.92
-        db.progress().upsertEpisode(EpisodeProgressEntity(epId, item.stableKey, positionMs, durationMs, finished, System.currentTimeMillis()))
+        user.progress().upsertEpisode(EpisodeProgressEntity(epId, item.stableKey, positionMs, durationMs, finished, System.currentTimeMillis()))
         val seriesDone = finished && epId == lastEpisodeId
-        db.progress().upsert(
+        user.progress().upsert(
             ProgressEntity(
                 stableKey = item.stableKey, type = ContentType.SERIES, title = seriesTitle, icon = seriesIcon,
                 positionMs = if (finished) 1 else positionMs, durationMs = durationMs,
@@ -846,21 +977,21 @@ class Repo(
 
     /** Al terminar: sale de «Ver más adelante» y pasa a «Vistas». */
     private suspend fun onFinished(stableKey: String) {
-        val later = db.folders().systemFolder("later") ?: return
-        db.folders().removeItem(later.id, stableKey)
+        val later = user.folders().systemFolder("later") ?: return
+        user.folders().removeItem(later.id, stableKey)
     }
 
     suspend fun markWatched(ref: ContentRef, watched: Boolean) {
         if (watched) {
-            db.progress().upsert(ProgressEntity(ref.stableKey, ref.type, ref.title, ref.icon, 1, 1, System.currentTimeMillis(), true))
+            user.progress().upsert(ProgressEntity(ref.stableKey, ref.type, ref.title, ref.icon, 1, 1, System.currentTimeMillis(), true))
             onFinished(ref.stableKey)
         } else {
-            db.progress().delete(ref.stableKey)
-            if (ref.isSeries) db.progress().clearEpisodes(ref.stableKey)
+            user.progress().delete(ref.stableKey)
+            if (ref.isSeries) user.progress().clearEpisodes(ref.stableKey)
         }
     }
 
-    suspend fun dismissContinue(stableKey: String) = db.progress().dismiss(stableKey)
+    suspend fun dismissContinue(stableKey: String) = user.progress().dismiss(stableKey)
 
     suspend fun audioPref(seriesKey: String) = db.misc().audio(seriesKey)
     suspend fun saveAudioPref(p: AudioPrefEntity) = db.misc().upsertAudio(p)

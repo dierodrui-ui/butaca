@@ -24,7 +24,7 @@ object HubCache {
  * (género, año, país, popularidad). Las categorías del servidor no se usan.
  */
 suspend fun Repo.movieHub(force: Boolean = false): Hub {
-    val kids = prefs.value.kidsLimit
+    val kids = kidsLimit
     val identifiedNow = db.items().identified(ContentType.MOVIE).size
     val cached = HubCache.hub
     if (!force && cached != null && HubCache.kids == kids && HubCache.basedOn == identifiedNow &&
@@ -57,12 +57,12 @@ suspend fun Repo.movieHub(force: Boolean = false): Hub {
     fun years(id: String, title: String, from: Int, to: Int) = add(id, title, all.filter { (it.year ?: 0) in from..to })
 
     val year = Calendar.getInstance().get(Calendar.YEAR)
-    val watched = db.progress().observeWatchedKeys().first().toSet()
+    val watched = user.progress().observeWatchedKeys().first().toSet()
 
     // 1) Lo que creemos que te gustará (a partir de tus favoritos; si no hay, de lo que has visto)
     val favId = systemFolderId("fav")
-    val favs = db.folders().items(favId).filter { it.type == ContentType.MOVIE }
-    val seeds = favs.map { it.stableKey }.ifEmpty { db.progress().observeWatched().first().map { it.stableKey } }.take(12)
+    val favs = user.folders().items(favId).filter { it.type == ContentType.MOVIE }
+    val seeds = favs.map { it.stableKey }.ifEmpty { user.progress().observeWatched().first().map { it.stableKey } }.take(12)
     if (seeds.isNotEmpty()) {
         val score = HashMap<String, Double>()
         val byKey = HashMap<String, ItemEntity>()

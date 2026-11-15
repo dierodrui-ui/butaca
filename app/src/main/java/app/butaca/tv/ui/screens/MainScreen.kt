@@ -17,6 +17,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import android.app.Activity
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import app.butaca.tv.ui.components.ConfirmDialog
 import androidx.compose.runtime.LaunchedEffect
@@ -44,7 +45,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-enum class Tab(val label: String) { HOME("Inicio"), SEARCH("Buscar"), WISH("Te digo lo que ver"), LIVE("Directo"), MOVIES("Películas"), SERIES("Series"), FOLDERS("Mis carpetas"), SETTINGS("Ajustes") }
+enum class Tab(val label: String) { HOME("Inicio"), SEARCH("Buscar"), WISH("Te digo lo que ver"), LIVE("Directo"), MOVIES("Películas"), SERIES("Series"), FOLDERS("Mis carpetas"), STATS("Mi actividad"), SETTINGS("Ajustes") }
 
 private fun Tab.icon(): ImageVector = when (this) {
     Tab.HOME -> Ic.Home
@@ -54,6 +55,7 @@ private fun Tab.icon(): ImageVector = when (this) {
     Tab.MOVIES -> Ic.Film
     Tab.SERIES -> Ic.Series
     Tab.FOLDERS -> Ic.Folder
+    Tab.STATS -> Ic.Stats
     Tab.SETTINGS -> Ic.Settings
 }
 
@@ -79,6 +81,7 @@ fun MainScreen(onLogout: () -> Unit) {
                     Tab.MOVIES -> MoviesScreen()
                     Tab.SERIES -> CatalogScreen(ContentType.SERIES)
                     Tab.FOLDERS -> FoldersScreen()
+                    Tab.STATS -> StatsScreen()
                     Tab.SETTINGS -> SettingsScreen(onLogout)
                 }
             }
@@ -96,7 +99,11 @@ fun MainScreen(onLogout: () -> Unit) {
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
 private fun Rail(current: Tab, onSelect: (Tab) -> Unit) {
-    val settings by ButacaApp.repo.prefs.flow.collectAsState()
+    val repo = ButacaApp.repo
+    val settings by repo.prefs.flow.collectAsState()
+    val profile by repo.profile.collectAsState()
+    var askPin by remember { mutableStateOf(false) }
+    val kid = profile?.kid == true
     Column(
         Modifier.width(190.dp).fillMaxHeight().background(C.Rail).padding(horizontal = 12.dp, vertical = 24.dp)
             .focusRestorer(),
@@ -109,11 +116,25 @@ private fun Rail(current: Tab, onSelect: (Tab) -> Unit) {
         ) {
             app.butaca.tv.ui.components.BrandLogo(34.dp, 22)
         }
-        if (settings.kidsLimit > 0) {
-            Box(
-                Modifier.padding(start = 12.dp, bottom = 12.dp).clip(RoundedCornerShape(999.dp)).background(C.Green)
-                    .padding(horizontal = 10.dp, vertical = 4.dp)
-            ) { T("Perfil infantil · hasta ${settings.kidsLimit} años", size = 11, weight = FontWeight.Bold, color = C.Bg) }
+        // Quién está viendo; pulsar para cambiar de perfil (desde un perfil infantil, con PIN)
+        profile?.let { p ->
+            app.butaca.tv.ui.components.FocusSurface(
+                onClick = { if (p.kid && settings.pin.isNotEmpty()) askPin = true else repo.leaveProfile() },
+                modifier = Modifier.fillMaxWidth().padding(bottom = 14.dp),
+                radius = 12.dp, container = C.Surface, focusedContainer = C.Raised, focusedScale = 1.02f,
+            ) {
+                Row(Modifier.padding(horizontal = 10.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    ProfileAvatar(p, 34)
+                    Column(Modifier.weight(1f)) {
+                        T(p.name, size = 14, weight = FontWeight.SemiBold, maxLines = 1)
+                        val left = repo.minutesLeft(p)
+                        T(
+                            when { p.kid && left != null -> "Quedan $left min"; p.kid -> "Infantil"; else -> "Cambiar de perfil" },
+                            size = 11, color = if (p.kid) Color(0xFF5BE3C4) else C.Muted, maxLines = 1,
+                        )
+                    }
+                }
+            }
         }
         Tab.entries.filter { it != Tab.SETTINGS }.forEach { t ->
             MenuRow(t.label, t.icon(), onClick = { onSelect(t) }, selected = t == current, iconTint = if (t == current) C.Accent else C.Muted)
@@ -134,8 +155,13 @@ private fun Rail(current: Tab, onSelect: (Tab) -> Unit) {
             Box(Modifier.size(7.dp).clip(CircleShape).background(if (active) C.Green else C.Red))
             T(statusText, size = 12, color = C.Muted, maxLines = 1)
         }
-        MenuRow(Tab.SETTINGS.label, Tab.SETTINGS.icon(), onClick = { onSelect(Tab.SETTINGS) }, selected = current == Tab.SETTINGS, iconTint = if (current == Tab.SETTINGS) C.Accent else C.Muted)
+        if (!kid) MenuRow(Tab.SETTINGS.label, Tab.SETTINGS.icon(), onClick = { onSelect(Tab.SETTINGS) }, selected = current == Tab.SETTINGS, iconTint = if (current == Tab.SETTINGS) C.Accent else C.Muted)
     }
+    if (askPin) app.butaca.tv.ui.components.PinDialog("PIN de adulto", "Para salir del perfil infantil.", onDismiss = { askPin = false }, onPin = { pin ->
+        val ok = pin == repo.prefs.value.pin
+        if (ok) { askPin = false; repo.leaveProfile() }
+        ok
+    })
 }
 
 @Composable

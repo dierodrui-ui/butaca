@@ -63,8 +63,6 @@ fun SettingsScreen(onLogout: () -> Unit) {
     var confirmLogout by remember { mutableStateOf(false) }
     var editingKey by remember { mutableStateOf(false) }
     var connecting by remember { mutableStateOf(false) }
-    var pendingKids by remember { mutableStateOf<Int?>(null) }
-    var kidsPinFor by remember { mutableStateOf<Int?>(null) }
     val kidsProgress by app.butaca.tv.data.KidsPrep.progress.collectAsState()
     val cloudRunning by app.butaca.tv.data.Cloud.running.collectAsState()
     val cloudMsg by app.butaca.tv.data.Cloud.message.collectAsState()
@@ -146,24 +144,19 @@ fun SettingsScreen(onLogout: () -> Unit) {
                     }
                 }
                 Section.PARENTAL -> {
-                    item { Header("PERFIL INFANTIL") }
+                    item { Header("PERFILES") }
                     item {
                         val kp = kidsProgress
                         SettingRow(
-                            "Perfil infantil",
+                            "Perfiles de la casa",
                             if (kp != null) "Preparando edades con TMDB: ${kp.first} de ${kp.second}…"
-                            else "Solo muestra lo apto para la edad elegida, según la calificación oficial (TMDB). Para quitarlo hace falta el PIN.",
-                            onClick = {
-                                val next = when (s.kidsLimit) { 0 -> 7; 7 -> 12; else -> 0 }
-                                when {
-                                    !repo.tmdb.enabled -> nav.toast("El perfil infantil necesita la clave de TMDB (Ajustes › Cuenta)")
-                                    s.kidsLimit == 0 && s.pin.isEmpty() -> { pendingKids = next; changingPin = true }
-                                    s.kidsLimit == 0 -> { repo.prefs.update { it.copy(kidsLimit = next) }; repo.startKidsPrep() }
-                                    else -> kidsPinFor = next
-                                }
-                            },
-                            value = when (s.kidsLimit) { 7 -> "Hasta 7 años"; 12 -> "Hasta 12 años"; else -> "Desactivado" },
+                            else "Cada perfil tiene sus listas, su historial y sus estadísticas. Los infantiles solo ven lo de su edad y pueden tener temporizador.",
+                            onClick = { repo.leaveProfile() }, value = "Gestionar",
                         )
+                    }
+                    item {
+                        SettingRow("Pedir PIN para los perfiles de adulto", "Así los peques no pueden entrar en el tuyo desde «¿Quién está ahí?».",
+                            onClick = { withPin { set { it.copy(lockAdults = !it.lockAdults) } } }, switch = s.lockAdults)
                     }
                     item { Header("CONTENIDO PARA ADULTOS") }
                     item {
@@ -277,20 +270,11 @@ fun SettingsScreen(onLogout: () -> Unit) {
             PinDialog("Repite el PIN", "Vuelve a escribir las mismas 4 cifras.", onDismiss = { changingPin = false }, onPin = { pin ->
                 if (pin == first) {
                     repo.prefs.update { it.copy(pin = pin) }; changingPin = false
-                    // Si veníamos de activar el perfil infantil, ahora sí se activa
-                    pendingKids?.let { k -> repo.prefs.update { it.copy(kidsLimit = k) }; repo.startKidsPrep(); pendingKids = null }
                     true
                 }
                 else { first = null; false }
             })
         }
-    }
-    kidsPinFor?.let { next ->
-        PinDialog("Escribe tu PIN", "Necesario para cambiar o quitar el perfil infantil.", onDismiss = { kidsPinFor = null }, onPin = { pin ->
-            val ok = pin == repo.prefs.value.pin
-            if (ok) { repo.prefs.update { it.copy(kidsLimit = next) }; kidsPinFor = null; if (next > 0) repo.startKidsPrep() }
-            ok
-        })
     }
     if (connecting) CloudConnectDialog(onDismiss = { connecting = false })
     if (editingKey) {

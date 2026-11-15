@@ -192,6 +192,39 @@ fun PlayerScreen(req: PlayRequest, onExit: () -> Unit) {
         }
     }
 
+    // Perfil infantil: consejos animados cada X minutos y «mosca» en la esquina
+    val viewer = remember { repo.profile.value }
+    val parents = remember { repo.prefs.value.parentsNames }
+    var spot by remember { mutableStateOf<KidSpot?>(null) }
+    // Cuenta el tiempo que se ve de verdad: historial y estadísticas del perfil, y cuándo toca consejo
+    LaunchedEffect(Unit) {
+        var sinceSpot = 0L
+        var pending = 0L
+        var spotIndex = (0 until KID_SPOTS.size).random()
+        var tick = 0
+        while (true) {
+            delay(1000)
+            tick++
+            val playing = player.isPlaying && spot == null
+            if (playing) { sinceSpot += 1000; pending += 1000 }
+            if (pending > 0 && (tick % 15 == 0 || !playing)) {
+                val item = req.items.getOrNull(player.currentMediaItemIndex)
+                val ms = pending; pending = 0
+                if (item != null) {
+                    val sub = if (item.episodeId != null) listOfNotNull(item.season?.let { "T$it" }, item.episode?.let { "E$it" }).joinToString(" · ").ifBlank { item.subtitle } else null
+                    scope.launch { try { repo.logWatch(item.stableKey, item.type, item.title, item.icon, sub, ms) } catch (_: Exception) { } }
+                }
+            }
+            val every = viewer?.takeIf { it.kid }?.adsEvery ?: 0
+            if (every > 0 && sinceSpot >= every * 60_000L && spot == null) {
+                player.pause()
+                playerView?.hideController()
+                spot = KID_SPOTS[spotIndex % KID_SPOTS.size]; spotIndex++
+                sinceSpot = 0
+            }
+        }
+    }
+
     // Guarda el progreso cada 10 segundos
     LaunchedEffect(Unit) {
         while (true) {
@@ -297,6 +330,11 @@ fun PlayerScreen(req: PlayRequest, onExit: () -> Unit) {
                 T(item?.title ?: "", size = 26, weight = FontWeight.Bold, maxLines = 1)
                 item?.subtitle?.let { T(it, size = 16, color = UiC.TextSoft, maxLines = 1) }
             }
+        }
+
+        if (viewer?.kid == true && viewer.tips) KidTipBug(viewer.name, parents, paused = spot != null)
+        spot?.let { s ->
+            KidSpotOverlay(s, viewer?.name ?: "", parents, onDone = { spot = null; player.play() })
         }
 
         error?.let { msg ->

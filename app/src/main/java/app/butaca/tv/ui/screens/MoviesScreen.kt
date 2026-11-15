@@ -99,7 +99,7 @@ private fun MovieHubView(onServer: () -> Unit) {
     // Mientras se leen géneros de TMDB, recalculamos de vez en cuando para ir completando
     var tick by remember { mutableStateOf(0) }
     LaunchedEffect(prep != null) { while (KidsPrep.progress.value != null) { delay(60_000); tick++ } ; tick++ }
-    val hub by produceState<Hub?>(HubCache.hub, settings.kidsLimit, settings.tmdbKey, tick) {
+    val hub by produceState<Hub?>(HubCache.hub, settings.tmdbKey, repo.kidsLimit, tick) {
         value = try { repo.movieHub() } catch (_: Exception) { value }
     }
     // Tu orden de categorías (y las que has ocultado)

@@ -457,24 +457,48 @@ interface MiscDao {
     entities = [
         CategoryEntity::class, ItemEntity::class, FolderEntity::class, FolderItemEntity::class,
         ProgressEntity::class, EpisodeProgressEntity::class, TrackedSeriesEntity::class, AudioPrefEntity::class,
-        AlertEntity::class,
+        AlertEntity::class, ProfileEntity::class,
     ],
-    version = 4,
+    version = 5,
     exportSchema = false,
 )
 abstract class ButacaDb : RoomDatabase() {
     abstract fun categories(): CategoryDao
     abstract fun items(): ItemDao
-    abstract fun folders(): FolderDao
-    abstract fun progress(): ProgressDao
     abstract fun misc(): MiscDao
+    abstract fun profiles(): ProfileDao
 
     companion object {
         fun create(context: Context): ButacaDb =
             Room.databaseBuilder(context, ButacaDb::class.java, "butaca.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                .addCallback(object : RoomDatabase.Callback() {
+                    override fun onCreate(db: SupportSQLiteDatabase) { insertMainProfile(db) }
+                })
                 .fallbackToDestructiveMigrationOnDowngrade()
                 .build()
+
+        private const val PROFILE_TABLE =
+            "CREATE TABLE IF NOT EXISTS `profile` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `name` TEXT NOT NULL, " +
+                "`color` INTEGER NOT NULL, `kid` INTEGER NOT NULL, `kidsLimit` INTEGER NOT NULL, `timerMin` INTEGER NOT NULL, " +
+                "`timerUsedMs` INTEGER NOT NULL, `timerExpired` INTEGER NOT NULL, `adsEvery` INTEGER NOT NULL, `tips` INTEGER NOT NULL, " +
+                "`position` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL)"
+
+        /** El perfil principal (id 1) siempre existe. */
+        private fun insertMainProfile(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "INSERT OR IGNORE INTO profile (id, name, color, kid, kidsLimit, timerMin, timerUsedMs, timerExpired, adsEvery, tips, position, createdAt) " +
+                    "VALUES (1, 'Principal', ${0xFFE8344BL}, 0, 0, 0, 0, 0, 0, 0, 0, ${System.currentTimeMillis()})"
+            )
+        }
+
+        /** v5: perfiles (quién está viendo). */
+        private val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(PROFILE_TABLE)
+                insertMainProfile(db)
+            }
+        }
 
         /** v4: popularidad, país e idioma de TMDB (para ordenar el catálogo por categorías). */
         private val MIGRATION_3_4 = object : Migration(3, 4) {

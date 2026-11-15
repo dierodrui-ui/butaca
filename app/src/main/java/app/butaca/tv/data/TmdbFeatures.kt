@@ -48,13 +48,16 @@ private object HomeCache {
     var rows: List<RelatedRow> = emptyList()
 }
 
+/** Al cambiar de perfil, las filas personales se vuelven a calcular. */
+fun resetProfileCaches() { HomeCache.at = 0L; HomeCache.rows = emptyList(); HubCache.hub = null }
+
 /** «Porque viste…», tendencias, imprescindibles, de temporada… solo con lo que tienes. */
 suspend fun Repo.homeRows(force: Boolean = false): List<RelatedRow> {
     if (!tmdb.enabled) return emptyList()
-    val kids = prefs.value.kidsLimit
+    val kids = kidsLimit
     if (!force && HomeCache.kids == kids && System.currentTimeMillis() - HomeCache.at < 60 * 60_000L && HomeCache.rows.isNotEmpty()) return HomeCache.rows
 
-    val watchedKeys = db.progress().observeWatchedKeys().first().toSet()
+    val watchedKeys = user.progress().observeWatchedKeys().first().toSet()
     val rows = ArrayList<RelatedRow>()
     val used = HashSet<String>()
     fun add(title: String, list: List<ItemEntity>, min: Int = 3) {
@@ -63,7 +66,7 @@ suspend fun Repo.homeRows(force: Boolean = false): List<RelatedRow> {
     }
 
     // Porque viste… (lo último que has terminado)
-    val watched = db.progress().observeWatched().first()
+    val watched = user.progress().observeWatched().first()
     var because = 0
     for (p in watched.take(8)) {
         if (because >= 2) break
@@ -119,7 +122,7 @@ suspend fun Repo.homeRows(force: Boolean = false): List<RelatedRow> {
 
 /** Estrenos en cines que aún no están en tu servidor. */
 suspend fun Repo.upcomingNotInServer(): List<TmdbTitle> {
-    if (!tmdb.enabled || prefs.value.kidsLimit > 0) return emptyList()
+    if (!tmdb.enabled || kidsLimit > 0) return emptyList()
     return tmdb.upcoming(2).filter { matchTitles(listOf(it), null).isEmpty() }.take(20)
 }
 
@@ -179,7 +182,7 @@ suspend fun Repo.monthStats(): MonthStats {
         set(Calendar.DAY_OF_MONTH, 1); set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0)
     }
     val since = cal.timeInMillis
-    val list = (db.progress().observeWatched().first() + db.progress().observeContinue().first())
+    val list = (user.progress().observeWatched().first() + user.progress().observeContinue().first())
         .filter { it.updatedAt >= since }.distinctBy { it.stableKey }
     val ms = list.sumOf { if (it.finished) it.durationMs.coerceAtLeast(0) else it.positionMs.coerceAtLeast(0) }
     val items = list.map { it.stableKey }.chunked(400).flatMap { db.items().genresOf(it) }.distinctBy { it.stableKey }
@@ -275,7 +278,7 @@ suspend fun Repo.cloudSync(): String {
         val favId = systemFolderId("fav")
 
         suspend fun idsOf(folderId: Long): List<Pair<ItemEntity, Int>> =
-            db.folders().items(folderId).mapNotNull { fi ->
+            user.folders().items(folderId).mapNotNull { fi ->
                 val item = bestItem(fi.stableKey) ?: return@mapNotNull null
                 val id = tmdbIdFor(item) ?: return@mapNotNull null
                 item to id
@@ -292,7 +295,7 @@ suspend fun Repo.cloudSync(): String {
                     if (ok) pushed++
                 }
             }
-            val localKeys = db.folders().items(folderId).map { it.stableKey }.toSet()
+            val localKeys = user.folders().items(folderId).map { it.stableKey }.toSet()
             for (found in matchTitles(remote, null)) {
                 if (found.stableKey !in localKeys) { addToFolder(folderId, found.toRef()); pulled++ }
             }
@@ -301,7 +304,7 @@ suspend fun Repo.cloudSync(): String {
         // ---- Vistas y carpetas propias ↔ listas «Butaca · …» ----
         val mapping = parseLists(s.tmdbLists)
         val remoteLists = tmdb.myLists(session, accId).toMutableList()
-        val userFolders = db.folders().observeFolders().first().filter { it.system == null }
+        val userFolders = user.folders().observeFolders().first().filter { it.system == null }
         val targets = listOf(WATCHED_FOLDER to "Vistas") + userFolders.map { it.id to it.name }
         for ((folderId, name) in targets) {
             val listId = mapping[folderId]
@@ -311,7 +314,7 @@ suspend fun Repo.cloudSync(): String {
             mapping[folderId] = listId
             val remoteIds = tmdb.listItems(listId).map { it.id }.toSet()
             val local: List<Pair<ItemEntity, Int>> = if (folderId == WATCHED_FOLDER) {
-                db.progress().observeWatched().first().mapNotNull { p ->
+                user.progress().observeWatched().first().mapNotNull { p ->
                     val item = bestItem(p.stableKey) ?: return@mapNotNull null
                     tmdbIdFor(item)?.let { item to it }
                 }
@@ -326,15 +329,15 @@ suspend fun Repo.cloudSync(): String {
             val name = fullName.removePrefix(PREFIX)
             val items = matchTitles(tmdb.listItems(listId), null)
             if (name == "Vistas") {
-                val watchedKeys = db.progress().observeWatchedKeys().first().toSet()
+                val watchedKeys = user.progress().observeWatchedKeys().first().toSet()
                 items.filter { it.stableKey !in watchedKeys }.forEach { markWatched(it.toRef(), true); pulled++ }
                 mapping[WATCHED_FOLDER] = listId
                 continue
             }
-            val folder = db.folders().observeFolders().first().firstOrNull { it.system == null && it.name == name }
+            val folder = user.folders().observeFolders().first().firstOrNull { it.system == null && it.name == name }
             val folderId = folder?.id ?: createFolder(name, 0xFF7FA8FF)
             mapping[folderId] = listId
-            val localKeys = db.folders().items(folderId).map { it.stableKey }.toSet()
+            val localKeys = user.folders().items(folderId).map { it.stableKey }.toSet()
             items.filter { it.stableKey !in localKeys }.forEach { addToFolder(folderId, it.toRef()); pulled++ }
         }
 

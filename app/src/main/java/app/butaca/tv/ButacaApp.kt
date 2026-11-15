@@ -32,7 +32,13 @@ class ButacaApp : Application(), ImageLoaderFactory {
             .build()
         val prefs = Prefs(this)
         val tmdb = TmdbClient(http, cacheDir) { prefs.value.tmdbKey.trim().ifBlank { BuildConfig.TMDB_KEY } }
-        repo = Repo(ButacaDb.create(this), XtreamClient(http), prefs, tmdb)
+        val db = ButacaDb.create(this)
+        // v3: lo que ya tenías pasa al perfil principal (una sola vez)
+        if (!prefs.value.profilesReady) {
+            try { app.butaca.tv.data.UserDb.moveLegacyData(this, db) } catch (_: Exception) { }
+            prefs.update { it.copy(profilesReady = true, lastProfile = 1L) }
+        }
+        repo = Repo(db, XtreamClient(http), prefs, tmdb) { id -> app.butaca.tv.data.UserDb.open(this, id) }
     }
 
     override fun newImageLoader(): ImageLoader =

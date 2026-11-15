@@ -119,8 +119,8 @@ fun HomeScreen(onGoFolders: () -> Unit) {
     var heroFocused by remember { mutableStateOf(false) }
     val settings by repo.prefs.flow.collectAsState()
     // Filas de TMDB: «Porque viste…», tendencias, imprescindibles, de temporada…
-    val discovery by produceState(emptyList<RelatedRow>(), settings.kidsLimit, settings.tmdbKey) { value = repo.homeRows() }
-    val upcoming by produceState(emptyList<TmdbTitle>(), settings.kidsLimit, settings.tmdbKey) { value = repo.upcomingNotInServer() }
+    val discovery by produceState(emptyList<RelatedRow>(), settings.tmdbKey, repo.kidsLimit) { value = repo.homeRows() }
+    val upcoming by produceState(emptyList<TmdbTitle>(), settings.tmdbKey, repo.kidsLimit) { value = repo.upcomingNotInServer() }
     val alerts by remember { repo.alerts() }.collectAsState(initial = emptyList())
     val alertKeys = alerts.map { it.key }.toSet()
     val ready by produceState(emptyList<Pair<AlertEntity, ItemEntity>>(), alerts) {
