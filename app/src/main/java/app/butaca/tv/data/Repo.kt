@@ -206,8 +206,18 @@ class Repo(
     }
 
     /** Historial: suma lo que se ha visto de un título hoy. */
-    suspend fun logWatch(stableKey: String, type: String, title: String, icon: String?, subtitle: String?, ms: Long) {
+    suspend fun logWatch(stableKey: String, type: String, title: String, icon: String?, subtitle: String?, ms: Long, session: Long = 0L) {
         if (ms <= 0 || _profile.value == null) return
+        // Historial de reproducciones: una línea por cada vez que se ve algo
+        if (session > 0) {
+            val part = subtitle.orEmpty()
+            val pl = user.plays().get(session, stableKey, part)
+            val now0 = System.currentTimeMillis()
+            user.plays().upsert(
+                (pl ?: PlayLogEntity(session, stableKey, part, type, title, icon, now0 - ms, now0, 0))
+                    .copy(lastAt = now0, watchedMs = (pl?.watchedMs ?: 0) + ms)
+            )
+        }
         val st = user.stats()
         val day = today()
         val now = System.currentTimeMillis()

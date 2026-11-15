@@ -104,7 +104,18 @@ suspend fun Repo.movieHub(force: Boolean = false): Hub {
             add("space", "Cine de espacio", space.sortedByDescending { it.pop ?: 0.0 })
         }
     } catch (_: Exception) { }
-    add("family", "Cine infantil y para toda la familia", all.filter { has(it, 10751) || (has(it, 16) && (it.cert ?: 0) <= 12) })
+    // Cine infantil: SOLO lo que pueden ver menores de 12 (calificación de TMDB hasta 7 años)
+    add("family", "Cine infantil", all.filter { (has(it, 10751) || has(it, 16)) && it.cert != null && it.cert <= 7 })
+    // Animación y dibujos: solo películas de animación
+    genre("animation", "Animación y dibujos", 16)
+    // I.A.: inteligencia artificial, androides y máquinas que piensan
+    try {
+        val kw = listOfNotNull(tmdb.keywordId("artificial intelligence"), tmdb.keywordId("android"), tmdb.keywordId("sentient machine")).distinct()
+        if (kw.isNotEmpty()) {
+            val ai = matchTitles(tmdb.discover(false, emptyList(), 20, mapOf("with_keywords" to kw.joinToString("|"))), null)
+            add("ai", "I.A. (inteligencia artificial)", ai.filter { it.type == ContentType.MOVIE }.sortedByDescending { it.pop ?: 0.0 })
+        }
+    } catch (_: Exception) { }
     // Top 10 de lo más visto ahora en España que tienes
     try {
         add("top10", "Top 10 en España", matchTitles(tmdb.popular(false, "ES", 5), null).take(10), numbered = true)
@@ -128,7 +139,8 @@ suspend fun Repo.movieHub(force: Boolean = false): Hub {
         val kw = listOfNotNull(tmdb.keywordId("teenager"), tmdb.keywordId("high school"), tmdb.keywordId("coming of age")).distinct()
         if (kw.isNotEmpty()) {
             val teen = matchTitles(tmdb.discover(false, emptyList(), 20, mapOf("with_keywords" to kw.joinToString("|"))), null)
-            add("teen", "Películas de adolescentes", teen.sortedByDescending { it.pop ?: 0.0 })
+            // Que las puedan ver adolescentes (calificación hasta 16) y de 2000 en adelante
+            add("teen", "Películas de adolescentes", teen.filter { it.cert != null && it.cert <= 16 && (it.year ?: 0) >= 2000 }.sortedByDescending { it.pop ?: 0.0 })
         }
     } catch (_: Exception) { }
     genre("docs", "Documentales", 99)

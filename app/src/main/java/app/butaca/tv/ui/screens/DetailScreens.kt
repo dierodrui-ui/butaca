@@ -348,7 +348,7 @@ fun MovieScreen(key: String, onBack: () -> Unit) {
                         certText(related?.cert ?: current.cert),
                     ).joinToString(" · ")
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        app.butaca.tv.ui.components.MatchLabel(app.butaca.tv.ui.components.LocalTaste.current?.match(related?.genres?.joinToString(",") ?: current.genre, current.rating ?: info?.rating, related?.tmdbId ?: current.tmdbId))
+                        app.butaca.tv.ui.components.MatchLabel(app.butaca.tv.ui.components.LocalTaste.current?.matchFor(current.stableKey, related?.genres?.joinToString(",") ?: current.genre, current.rating ?: info?.rating, related?.tmdbId ?: current.tmdbId))
                         if (meta.isNotBlank()) T(meta, size = 14, color = C.Muted)
                     }
                     TagChips(related)
@@ -480,7 +480,7 @@ fun SeriesScreen(key: String, onBack: () -> Unit) {
                     certText(related?.cert ?: current.cert),
                 ).joinToString(" · ")
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    app.butaca.tv.ui.components.MatchLabel(app.butaca.tv.ui.components.LocalTaste.current?.match(related?.genres?.joinToString(",") ?: current.genre, current.rating ?: info?.rating, related?.tmdbId ?: current.tmdbId))
+                    app.butaca.tv.ui.components.MatchLabel(app.butaca.tv.ui.components.LocalTaste.current?.matchFor(current.stableKey, related?.genres?.joinToString(",") ?: current.genre, current.rating ?: info?.rating, related?.tmdbId ?: current.tmdbId))
                     if (meta.isNotBlank()) T(meta, size = 14, color = C.Muted)
                 }
                 // Estado de la serie según TMDB

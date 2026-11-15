@@ -4,6 +4,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -100,54 +101,57 @@ fun DiceDialog(onDismiss: () -> Unit) {
         app.butaca.tv.ui.components.RatingDialog(r.toRef(), onDismiss = { rating = null; rolls++ })
         return
     }
-    AppDialog(onDismiss, width = 760) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            DiceFace(face, Modifier.size(54.dp).graphicsLayer { rotationZ = spin.value * 720f })
+    AppDialog(onDismiss, width = 780) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            DiceFace(face, Modifier.size(40.dp).graphicsLayer { rotationZ = spin.value * 720f })
             Column {
-                T("Sorpréndeme", size = 24, weight = FontWeight.Bold)
-                T(if (rolling) "Tirando el dado…" else "Una que no has visto y que encaja contigo", size = 13, color = C.Muted)
+                T("Sorpréndeme", size = 20, weight = FontWeight.Bold)
+                T(if (rolling) "Tirando el dado…" else "Una que no has visto y que encaja contigo", size = 12, color = C.Muted)
             }
         }
         val p = pick
         if (!rolling && p != null) {
-            Row(Modifier.graphicsLayer { alpha = reveal.value; translationY = (1 - reveal.value) * 30f }, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                Box(Modifier.width(150.dp).aspectRatio(2f / 3f).clip(RoundedCornerShape(12.dp))) {
-                    Artwork(p.icon, p.name, p.stableKey, Modifier.fillMaxSize(), titleSize = 16)
+            Row(Modifier.graphicsLayer { alpha = reveal.value; translationY = (1 - reveal.value) * 30f }, horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+                Box(Modifier.width(128.dp).aspectRatio(2f / 3f).clip(RoundedCornerShape(10.dp))) {
+                    Artwork(p.icon, p.name, p.stableKey, Modifier.fillMaxSize(), titleSize = 14)
                 }
-                // ¿Buena sorpresa? Pulgar arriba (verde) o abajo (rojo: no vuelve a salir)
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.padding(top = 8.dp)) {
-                    ThumbButton(Ic.ThumbUp, Color(0xFF3DD68C), vote == true) {
-                        vote = true; app.butaca.tv.data.DiceVotes.vote(repo, p.stableKey, true)
-                    }
-                    ThumbButton(Ic.ThumbDown, Color(0xFFE8344B), vote == false) {
-                        vote = false; app.butaca.tv.data.DiceVotes.vote(repo, p.stableKey, false)
-                        nav.toast("Anotado: «${p.name}» no volverá a salir")
-                        rolls++
-                    }
-                }
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    T(p.name, size = 24, weight = FontWeight.Bold, maxLines = 2, lineHeight = 28)
-                    T(listOfNotNull(p.year?.toString(), p.genre?.split(',')?.take(3)?.joinToString(", "), p.rating?.let { "★ %.1f".format(it).replace('.', ',') }).joinToString(" · "), size = 14, color = C.Muted, maxLines = 2)
-                    MatchLabel(LocalTaste.current?.match(p.genre, p.rating, p.tmdbId))
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                    T(p.name, size = 22, weight = FontWeight.Bold, maxLines = 2, lineHeight = 26)
+                    T(listOfNotNull(p.year?.toString(), p.genre?.split(',')?.take(3)?.joinToString(", "), p.rating?.let { "★ %.1f".format(it).replace('.', ',') }).joinToString(" · "), size = 13, color = C.Muted, maxLines = 2)
+                    MatchLabel(LocalTaste.current?.matchFor(p.stableKey, p.genre, p.rating, p.tmdbId))
                     p.plot?.takeIf { it.isNotBlank() }?.let { T(it, size = 13, color = C.TextSoft, maxLines = 4, lineHeight = 18) }
+                    when (vote) {
+                        true -> T("¡Anotado! Tendrá en cuenta títulos así.", size = 12, weight = FontWeight.SemiBold, color = Color(0xFF3DD68C))
+                        else -> {}
+                    }
                 }
             }
-            if (vote == true) T("¡Anotado! Te gusta la sorpresa: tendrá en cuenta títulos así.", size = 13, color = Color(0xFF3DD68C))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End)) {
+            // Todos los botones en una sola fila: fácil de recorrer con el mando
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                ThumbButton(Ic.ThumbUp, Color(0xFF3DD68C), vote == true) {
+                    vote = true; app.butaca.tv.data.DiceVotes.vote(repo, p.stableKey, true)
+                }
+                ThumbButton(Ic.ThumbDown, Color(0xFFE8344B), vote == false) {
+                    vote = false; app.butaca.tv.data.DiceVotes.vote(repo, p.stableKey, false)
+                    nav.toast("Anotado: «${p.name}» no volverá a salir")
+                    rolls++
+                }
+                Box(Modifier.width(1.dp).height(24.dp).background(C.Border))
                 val inLater by remember(p.stableKey) { repo.foldersOf(p.stableKey) }.collectAsState(initial = emptySet())
                 val isLater = laterId != null && laterId in inLater
-                if (laterId != null) ActionButton(if (isLater) "En tu lista" else "Ver más adelante", Ic.Clock, onClick = {
+                if (laterId != null) ActionButton(if (isLater) "En tu lista" else "Más adelante", Ic.Clock, onClick = {
                     scope.launch { repo.toggleFolder(laterId, p.toRef(), isLater) }
-                }, active = if (isLater) C.Gold else null)
+                }, active = if (isLater) C.Gold else null, height = 36.dp, compact = true)
                 ActionButton("Vista", Ic.Check, onClick = {
                     scope.launch { repo.markWatched(p.toRef(), true) }
                     rating = p
-                })
-                ActionButton("Otra tirada", Ic.Dice, onClick = { rolls++ })
-                ActionButton("Ver ficha", Ic.Info, onClick = { onDismiss(); nav.openItem(p) })
+                }, height = 36.dp, compact = true)
+                ActionButton("Ficha", Ic.Info, onClick = { onDismiss(); nav.openItem(p) }, height = 36.dp, compact = true)
+                androidx.compose.foundation.layout.Spacer(Modifier.weight(1f))
+                ActionButton("Otra tirada", Ic.Dice, onClick = { rolls++ }, solid = C.Accent, height = 36.dp, compact = true)
                 ActionButton("Reproducir", Ic.Play, onClick = {
                     scope.launch { repo.playRequestFor(p, 0)?.let { onDismiss(); nav.play(it) } }
-                }, primary = true, modifier = Modifier.focusRequester(playFocus))
+                }, primary = true, height = 36.dp, compact = true, modifier = Modifier.focusRequester(playFocus))
             }
         } else if (none) {
             T("Ya has visto todo lo que encaja… o todavía se está leyendo tu catálogo en TMDB. Prueba en un rato.", size = 15, color = C.TextSoft)
@@ -155,7 +159,7 @@ fun DiceDialog(onDismiss: () -> Unit) {
                 ActionButton("Cerrar", null, onClick = onDismiss, primary = true, modifier = Modifier.focusRequester(playFocus))
             }
         } else {
-            Box(Modifier.fillMaxWidth().height(160.dp))
+            Box(Modifier.fillMaxWidth().height(190.dp))
         }
     }
 }
@@ -163,10 +167,10 @@ fun DiceDialog(onDismiss: () -> Unit) {
 @Composable
 private fun ThumbButton(icon: androidx.compose.ui.graphics.vector.ImageVector, color: Color, on: Boolean, onClick: () -> Unit) {
     app.butaca.tv.ui.components.FocusSurface(
-        onClick = onClick, modifier = Modifier.size(52.dp), radius = 999.dp,
+        onClick = onClick, modifier = Modifier.size(36.dp), radius = 999.dp,
         container = if (on) color else color.copy(alpha = 0.18f), focusedContainer = color,
         content = if (on) Color.White else color, focusedContent = Color.White, focusedScale = 1.12f,
-    ) { androidx.tv.material3.Icon(icon, null, tint = androidx.tv.material3.LocalContentColor.current, modifier = Modifier.size(24.dp).align(Alignment.Center)) }
+    ) { androidx.tv.material3.Icon(icon, null, tint = androidx.tv.material3.LocalContentColor.current, modifier = Modifier.size(17.dp).align(Alignment.Center)) }
 }
 
 /** Cara de un dado con sus puntos. */

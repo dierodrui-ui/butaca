@@ -112,6 +112,8 @@ data class MenuRequest(
     val folderId: Long? = null,
     val folderIsSystem: Boolean = false,
     val onMove: (() -> Unit)? = null,
+    /** Opciones propias de la lista desde la que se abre (texto → acción). */
+    val extra: List<Pair<String, () -> Unit>> = emptyList(),
 )
 
 @Composable
@@ -190,6 +192,9 @@ fun QuickMenu(
             }
             if (req.inContinue) {
                 MenuRow("Quitar de «Seguir viendo»", Ic.Close, onClick = { scope.launch { repo.dismissContinue(ref.stableKey); onDismiss() } })
+            }
+            req.extra.forEach { (label, action) ->
+                MenuRow(label, Ic.EyeOff, onClick = { onDismiss(); action() })
             }
             if (req.folderId != null && !req.folderIsSystem) {
                 MenuRow("Quitar de esta carpeta", Ic.Minus, onClick = { scope.launch { repo.removeFromFolder(req.folderId, ref.stableKey); onDismiss() } })

@@ -200,6 +200,7 @@ fun PlayerScreen(req: PlayRequest, onExit: () -> Unit) {
     LaunchedEffect(Unit) {
         var sinceSpot = 0L
         var pending = 0L
+        val session = System.currentTimeMillis()
         var spotIndex = (0 until KID_SPOTS.size).random()
         var tick = 0
         while (true) {
@@ -212,7 +213,7 @@ fun PlayerScreen(req: PlayRequest, onExit: () -> Unit) {
                 val ms = pending; pending = 0
                 if (item != null) {
                     val sub = if (item.episodeId != null) listOfNotNull(item.season?.let { "T$it" }, item.episode?.let { "E$it" }).joinToString(" · ").ifBlank { item.subtitle } else null
-                    scope.launch { try { repo.logWatch(item.stableKey, item.type, item.title, item.icon, sub, ms) } catch (_: Exception) { } }
+                    scope.launch { try { repo.logWatch(item.stableKey, item.type, item.title, item.icon, sub, ms, session) } catch (_: Exception) { } }
                 }
             }
             val every = viewer?.takeIf { it.kid }?.adsEvery ?: 0

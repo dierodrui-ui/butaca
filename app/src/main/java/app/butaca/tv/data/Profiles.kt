@@ -115,6 +115,35 @@ interface TasteDao {
     suspend fun get(key: String): Int?
 }
 
+/** Cada reproducción: qué, cuándo empezó y cuánto rato se vio. */
+@Entity(tableName = "play_log", primaryKeys = ["session", "stableKey", "part"])
+data class PlayLogEntity(
+    val session: Long,       // cuándo se abrió el reproductor
+    val stableKey: String,
+    val part: String,        // «T1 · E3» en series; vacío en películas
+    val type: String,
+    val title: String,
+    val icon: String?,
+    val startedAt: Long,
+    val lastAt: Long,
+    val watchedMs: Long,
+)
+
+@Dao
+interface PlayLogDao {
+    @Query("SELECT * FROM play_log WHERE session = :session AND stableKey = :key AND part = :part")
+    suspend fun get(session: Long, key: String, part: String): PlayLogEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(p: PlayLogEntity)
+
+    @Query("SELECT * FROM play_log ORDER BY startedAt DESC LIMIT :limit")
+    fun observe(limit: Int): Flow<List<PlayLogEntity>>
+
+    @Query("SELECT COUNT(*) FROM play_log")
+    fun observeCount(): Flow<Int>
+}
+
 data class TitleTotal(val stableKey: String, val type: String, val title: String, val icon: String?, val total: Long, val lastAt: Long)
 
 @Dao
@@ -171,9 +200,9 @@ interface StatsDao {
 @Database(
     entities = [
         FolderEntity::class, FolderItemEntity::class, ProgressEntity::class, EpisodeProgressEntity::class,
-        TrackedSeriesEntity::class, UsageDayEntity::class, WatchLogEntity::class, TasteEntity::class,
+        TrackedSeriesEntity::class, UsageDayEntity::class, WatchLogEntity::class, TasteEntity::class, PlayLogEntity::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = false,
 )
 abstract class UserDb : RoomDatabase() {
@@ -182,6 +211,7 @@ abstract class UserDb : RoomDatabase() {
     abstract fun tracked(): TrackedDao
     abstract fun stats(): StatsDao
     abstract fun taste(): TasteDao
+    abstract fun plays(): PlayLogDao
 
     companion object {
         fun fileName(profileId: Long) = "user_$profileId.db"
@@ -193,6 +223,14 @@ abstract class UserDb : RoomDatabase() {
                         db.execSQL(
                             "CREATE TABLE IF NOT EXISTS `taste` (`stableKey` TEXT NOT NULL, `type` TEXT NOT NULL, `title` TEXT NOT NULL, " +
                                 "`icon` TEXT, `score` INTEGER NOT NULL, `genre` TEXT, `tmdbId` INTEGER, `at` INTEGER NOT NULL, PRIMARY KEY(`stableKey`))"
+                        )
+                    }
+                }, object : androidx.room.migration.Migration(2, 3) {
+                    override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                        db.execSQL(
+                            "CREATE TABLE IF NOT EXISTS `play_log` (`session` INTEGER NOT NULL, `stableKey` TEXT NOT NULL, `part` TEXT NOT NULL, " +
+                                "`type` TEXT NOT NULL, `title` TEXT NOT NULL, `icon` TEXT, `startedAt` INTEGER NOT NULL, `lastAt` INTEGER NOT NULL, " +
+                                "`watchedMs` INTEGER NOT NULL, PRIMARY KEY(`session`, `stableKey`, `part`))"
                         )
                     }
                 })

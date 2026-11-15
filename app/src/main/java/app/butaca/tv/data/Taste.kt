@@ -22,10 +22,18 @@ class TasteModel(
     private val related: Map<Int, Float>,          // id de TMDB → -1..1 (recomendado por lo que te gustó / no te gustó)
     private val index: Map<String, MatchRow>,      // stableKey → datos para calcular
     val signals: Int,
+    /** Tus notas: lo que has valorado tú manda (un 10 = 100 %, un 7 = 70 %…). */
+    private val rated: Map<String, Int> = emptyMap(),
 ) {
+    fun rated(stableKey: String): Int? = rated[stableKey]?.let { it * 10 }
+
+    /** % para un título concreto: tu nota si la tiene; si no, el cálculo. */
+    fun matchFor(stableKey: String, genre: String?, rating: Double?, tmdbId: Int?): Int? =
+        rated(stableKey) ?: match(stableKey) ?: match(genre, rating, tmdbId)
+
     val ready: Boolean get() = signals >= 3
 
-    fun match(stableKey: String): Int? = index[stableKey]?.let { match(it.genre, it.rating, it.tmdbId) }
+    fun match(stableKey: String): Int? = rated(stableKey) ?: index[stableKey]?.let { match(it.genre, it.rating, it.tmdbId) }
 
     fun match(genre: String?, rating: Double?, tmdbId: Int?): Int? {
         if (!ready) return null
@@ -145,7 +153,7 @@ suspend fun Repo.buildTaste(): TasteModel {
         }
     }
     val index = db.items().matchIndex().associateBy { it.stableKey }
-    return TasteModel(genreAff, related, index, signals)
+    return TasteModel(genreAff, related, index, signals, ratings.associate { it.stableKey to it.score })
 }
 
 // ----- Notas -----
@@ -235,5 +243,23 @@ object DiceVotes {
         if (good) { u += stableKey; d -= stableKey } else { d += stableKey; u -= stableKey }
         sp().edit().putStringSet("down_$p", d).putStringSet("up_$p", u).apply()
         Taste.rebuild(repo)
+    }
+}
+
+
+/** Títulos que has quitado de una lista concreta («No mostrar en esta lista»). Por perfil. */
+object ListExclusions {
+    private fun sp() = app.butaca.tv.ButacaApp.instance.getSharedPreferences("list_excl", android.content.Context.MODE_PRIVATE)
+    val version = kotlinx.coroutines.flow.MutableStateFlow(0)
+    private fun key(repo: Repo) = "p_${repo.profile.value?.id ?: 0L}"
+    fun all(repo: Repo): Set<String> = sp().getStringSet(key(repo), emptySet()) ?: emptySet()
+    fun hidden(repo: Repo, listId: String, stableKey: String) = "$listId::$stableKey" in all(repo)
+    fun hide(repo: Repo, listId: String, stableKey: String) {
+        sp().edit().putStringSet(key(repo), all(repo) + "$listId::$stableKey").apply()
+        version.value++
+    }
+    fun clear(repo: Repo, listId: String) {
+        sp().edit().putStringSet(key(repo), all(repo).filterNot { it.startsWith("$listId::") }.toSet()).apply()
+        version.value++
     }
 }

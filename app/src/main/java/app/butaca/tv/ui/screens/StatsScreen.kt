@@ -36,6 +36,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.composed
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.foundation.focusable
@@ -98,7 +99,9 @@ fun StatsScreen() {
     val activity by remember { repo.activity() }.collectAsState(initial = emptyList())
     val ratings by remember { repo.user.taste().observeAll() }.collectAsState(initial = emptyList())
     val scores = remember(ratings) { ratings.associate { it.stableKey to it.score } }
-    var filter by remember { mutableStateOf(0) }   // 0 todas, 1 empezadas, 2 vistas, 3 sin valorar
+    var openList by remember { mutableStateOf<Int?>(null) }   // 0 todas, 1 empezadas, 2 vistas, 3 sin valorar
+    var fullHistory by remember { mutableStateOf(false) }
+    val plays by remember { repo.user.plays().observe(1000) }.collectAsState(initial = emptyList())
     var menuFor by remember { mutableStateOf<app.butaca.tv.data.ActivityRow?>(null) }
     val genres by produceState(emptyList<Pair<String, Long>>(), top) {
         val counts = HashMap<String, Long>()
@@ -141,42 +144,18 @@ fun StatsScreen() {
                 StatCard("Títulos terminados", "${finished.size}", "películas y series", Modifier.weight(1f))
             }
         }
-        // Todo lo visto y empezado, con el % visto y tu nota
+        // Vistas y empezadas: cuatro accesos; cada uno abre su lista completa en otra ventana
         item(key = "seenTitle") {
+            val started = activity.count { it.fraction < 1f }
+            val seen = activity.count { it.fraction >= 1f }
+            val unrated = activity.count { it.stableKey !in scores }
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                SectionTitle("Vistas y empezadas", extra = "${activity.size}")
-                T("Pulsa un título para valorarlo: tus notas enseñan a Butaca lo que te gusta.", size = 13, color = C.Muted)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    val started = activity.count { it.fraction < 1f }
-                    val seen = activity.count { it.fraction >= 1f }
-                    val unrated = activity.count { it.stableKey !in scores }
-                    listOf("Todas · ${activity.size}", "Empezadas · $started", "Vistas · $seen", "Sin valorar · $unrated").forEachIndexed { i, l ->
-                        app.butaca.tv.ui.components.Pill(l, filter == i, { filter = i }, small = true)
-                    }
-                }
-            }
-        }
-        val shownActivity = activity.filter {
-            when (filter) { 1 -> it.fraction < 1f; 2 -> it.fraction >= 1f; 3 -> it.stableKey !in scores; else -> true }
-        }
-        if (shownActivity.isEmpty()) item(key = "seenEmpty") { T("Aquí aparecerá todo lo que veas o marques como visto.", size = 14, color = C.Faint) }
-        shownActivity.chunked(7).forEachIndexed { r, row ->
-            item(key = "seenRow$r") {
-                Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    row.forEach { a ->
-                        Box(Modifier.weight(1f)) {
-                            val pct = (a.fraction * 100).toInt()
-                            val meta = listOfNotNull(
-                                if (a.fraction >= 1f) "Vista" else "$pct% visto",
-                                scores[a.stableKey]?.let { "★ $it" } ?: "Sin valorar",
-                            ).joinToString(" · ")
-                            PosterCard(
-                                title = a.title, icon = a.icon, keySeed = a.stableKey, meta = meta, width = null,
-                                isSeries = a.type == "series", onClick = { menuFor = a },
-                            )
-                        }
-                    }
-                    repeat(7 - row.size) { Spacer(Modifier.weight(1f)) }
+                SectionTitle("Vistas y empezadas")
+                Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                    ListTile("Todas", activity.size, "lo visto y lo empezado", C.TextSoft, Modifier.weight(1f)) { openList = 0 }
+                    ListTile("Empezadas", started, "con su % visto", Color(0xFFFFC24A), Modifier.weight(1f)) { openList = 1 }
+                    ListTile("Vistas", seen, "terminadas o marcadas", C.Green, Modifier.weight(1f)) { openList = 2 }
+                    ListTile("Sin valorar", unrated, "ponles nota para afinar", C.AccentSoft, Modifier.weight(1f)) { openList = 3 }
                 }
             }
         }
@@ -219,18 +198,17 @@ fun StatsScreen() {
                 }
             }
         }
-        item(key = "histTitle") { SectionTitle("Historial", extra = if (history.isEmpty()) "todavía vacío" else null) }
-        var lastDay = ""
-        history.forEach { h ->
-            if (h.day != lastDay) {
-                val d = h.day
-                lastDay = d
-                item(key = "d$d") { T(dayLabel(d, "EEEE d 'de' MMMM").replaceFirstChar { it.uppercase() }, size = 13, weight = FontWeight.Bold, color = C.Faint) }
+        item(key = "histTitle") {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                SectionTitle("Historial de reproducciones", extra = if (plays.isEmpty()) "todavía vacío" else "${plays.size}")
+                if (plays.size > 30) app.butaca.tv.ui.components.ActionButton("Ver todo", app.butaca.tv.ui.Ic.Info, onClick = { fullHistory = true }, height = 34.dp, compact = true)
             }
-            item(key = "h${h.day}${h.stableKey}") { HistoryRow(h) }
         }
+        playHistoryItems(plays.take(30))
     }
-    // El menú va fuera de la lista para que se abra siempre
+    // Ventanas: lista completa de vistas/empezadas, historial completo y menú de cada título
+    openList?.let { f -> ActivityListOverlay(f, activity, scores, onOpen = { menuFor = it }, onClose = { openList = null }) }
+    if (fullHistory) FullHistoryOverlay(plays, onClose = { fullHistory = false })
     menuFor?.let { a -> ActivityMenu(a, scores[a.stableKey], onDismiss = { menuFor = null }) }
     }
 }
@@ -303,6 +281,112 @@ private fun HistoryRow(h: WatchLogEntity) {
             }
             T(durationLabel(h.watchedMs), size = 14, weight = FontWeight.SemiBold, color = C.AccentSoft)
             T(SimpleDateFormat("HH:mm", Locale("es", "ES")).format(java.util.Date(h.lastAt)), size = 12, color = C.Faint)
+        }
+    }
+}
+
+@Composable
+private fun ListTile(title: String, count: Int, sub: String, color: Color, modifier: Modifier, onClick: () -> Unit) {
+    FocusSurface(onClick = onClick, modifier = modifier.height(96.dp), radius = 16.dp, container = C.Surface, focusedContainer = C.Raised, focusedScale = 1.04f) {
+        Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Box(Modifier.size(10.dp).clip(RoundedCornerShape(99.dp)).background(color))
+                T(title, size = 14, weight = FontWeight.SemiBold, color = C.TextSoft)
+            }
+            T("$count", size = 28, weight = FontWeight.ExtraBold)
+            T(sub, size = 11, color = C.Faint, maxLines = 1)
+        }
+    }
+}
+
+/** Lista completa (en su propia ventana) de vistas, empezadas o sin valorar. */
+@Composable
+private fun ActivityListOverlay(
+    filter: Int, all: List<app.butaca.tv.data.ActivityRow>, scores: Map<String, Int>,
+    onOpen: (app.butaca.tv.data.ActivityRow) -> Unit, onClose: () -> Unit,
+) {
+    androidx.activity.compose.BackHandler { onClose() }
+    val title = listOf("Todas", "Empezadas", "Vistas", "Sin valorar")[filter]
+    val list = all.filter { when (filter) { 1 -> it.fraction < 1f; 2 -> it.fraction >= 1f; 3 -> it.stableKey !in scores; else -> true } }
+    val first = remember { androidx.compose.ui.focus.FocusRequester() }
+    LaunchedEffect(list.isNotEmpty()) { delay(100); try { first.requestFocus() } catch (_: Exception) { } }
+    Box(Modifier.fillMaxSize().background(C.Bg)) {
+        androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
+            columns = androidx.compose.foundation.lazy.grid.GridCells.Adaptive(108.dp),
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(start = 40.dp, end = 40.dp, top = 28.dp, bottom = 60.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    T(title, size = 28, weight = FontWeight.Bold)
+                    T("${list.size} títulos · pulsa uno para valorarlo o abrir su ficha · Atrás para volver", size = 13, color = C.Muted)
+                }
+            }
+            items(list.size, key = { list[it].stableKey }) { i ->
+                val a = list[i]
+                val pct = (a.fraction * 100).toInt()
+                PosterCard(
+                    title = a.title, icon = a.icon, keySeed = a.stableKey, width = null, isSeries = a.type == "series",
+                    modifier = if (i == 0) Modifier.focusRequester(first) else Modifier,
+                    meta = (if (a.fraction >= 1f) "Vista" else "$pct% visto") + " · " + (scores[a.stableKey]?.let { "★ $it" } ?: "Sin valorar"),
+                    onClick = { onOpen(a) },
+                )
+            }
+        }
+    }
+}
+
+private val timeFmt = SimpleDateFormat("HH:mm", Locale("es", "ES"))
+
+/** Historial de reproducciones agrupado por días. */
+private fun androidx.compose.foundation.lazy.LazyListScope.playHistoryItems(
+    plays: List<app.butaca.tv.data.PlayLogEntity>, first: androidx.compose.ui.focus.FocusRequester? = null,
+) {
+    var lastDay = ""
+    plays.forEach { p ->
+        val day = dayIn.format(java.util.Date(p.startedAt))
+        if (day != lastDay) {
+            lastDay = day
+            item(key = "pd$day") { T(dayLabel(day, "EEEE d 'de' MMMM yyyy").replaceFirstChar { it.uppercase() }, size = 13, weight = FontWeight.Bold, color = C.Faint) }
+        }
+        val isFirst = p === plays.first()
+        item(key = "p${p.session}${p.stableKey}${p.part}") { PlayRow(p, if (isFirst && first != null) Modifier.focusRequester(first) else Modifier) }
+    }
+}
+
+@Composable
+private fun PlayRow(p: app.butaca.tv.data.PlayLogEntity, modifier: Modifier = Modifier) {
+    val nav = LocalNav.current
+    FocusSurface(
+        onClick = { nav.openRef(ContentRef(p.stableKey, p.type, p.title, p.icon, null, null, null)) },
+        modifier = modifier.fillMaxWidth().height(60.dp), radius = 12.dp, container = C.Surface, focusedContainer = C.Raised, focusedScale = 1.01f,
+    ) {
+        Row(Modifier.fillMaxSize().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            T(timeFmt.format(java.util.Date(p.startedAt)) + " – " + timeFmt.format(java.util.Date(p.lastAt)), size = 14, weight = FontWeight.SemiBold, color = C.TextSoft, modifier = Modifier.width(118.dp))
+            Box(Modifier.size(width = 30.dp, height = 44.dp).clip(RoundedCornerShape(5.dp))) { Artwork(p.icon, p.title, p.stableKey, Modifier.fillMaxSize()) }
+            Column(Modifier.weight(1f)) {
+                T(p.title, size = 15, weight = FontWeight.SemiBold, maxLines = 1)
+                T(listOfNotNull(when (p.type) { "series" -> "Serie"; "live" -> "Directo"; else -> "Película" }, p.part.ifBlank { null }).joinToString(" · "), size = 12, color = C.Muted, maxLines = 1)
+            }
+            T(durationLabel(p.watchedMs), size = 14, weight = FontWeight.SemiBold, color = C.AccentSoft)
+        }
+    }
+}
+
+@Composable
+private fun FullHistoryOverlay(plays: List<app.butaca.tv.data.PlayLogEntity>, onClose: () -> Unit) {
+    androidx.activity.compose.BackHandler { onClose() }
+    val first = remember { androidx.compose.ui.focus.FocusRequester() }
+    LaunchedEffect(Unit) { delay(100); try { first.requestFocus() } catch (_: Exception) { } }
+    Box(Modifier.fillMaxSize().background(C.Bg)) {
+        LazyColumn(
+            Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 40.dp, end = 40.dp, top = 28.dp, bottom = 60.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            item { T("Historial de reproducciones", size = 28, weight = FontWeight.Bold) }
+            item { T("${plays.size} reproducciones · Atrás para volver", size = 13, color = C.Muted) }
+            playHistoryItems(plays, first)
         }
     }
 }

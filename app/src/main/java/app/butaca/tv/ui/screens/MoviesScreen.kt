@@ -120,9 +120,13 @@ private fun MovieHubView(type: String, onServer: () -> Unit) {
     var moving by remember { mutableStateOf<String?>(null) }
     var draft by remember { mutableStateOf<List<String>>(emptyList()) }
     var catMenu by remember { mutableStateOf<HubRow?>(null) }
-    val arranged = remember(hub, settings.hubOrder, settings.hubHidden, forYou) {
+    // Lo que has quitado de cada lista («No mostrar en esta lista»)
+    val exclVersion by app.butaca.tv.data.ListExclusions.version.collectAsState()
+    val arranged = remember(hub, settings.hubOrder, settings.hubHidden, forYou, exclVersion) {
+        val excl = app.butaca.tv.data.ListExclusions.all(repo)
         hub?.arrange(settings.hubOrder, settings.hubHidden).orEmpty()
             .map { r -> if (r.id.endsWith("foryou") && forYou.size >= 3) r.copy(all = forYou) else r }
+            .map { r -> if (excl.isEmpty()) r else r.copy(all = r.all.filter { "${r.id}::${it.stableKey}" !in excl }) }
             .filter { it.all.isNotEmpty() }
     }
     val rows = if (moving != null) draft.mapNotNull { id -> arranged.firstOrNull { it.id == id } } else arranged
@@ -219,6 +223,10 @@ private fun MovieHubView(type: String, onServer: () -> Unit) {
                         repo.prefs.update { s -> s.copy(hubHidden = (s.hubHidden.split(',').filter { it.isNotBlank() } + r.id).distinct().joinToString(",")) }
                         catMenu = null
                     })
+                    val quitados = app.butaca.tv.data.ListExclusions.all(repo).count { it.startsWith("${r.id}::") }
+                    if (quitados > 0) MenuRow("Volver a mostrar los $quitados títulos que quitaste", Ic.Refresh, onClick = {
+                        app.butaca.tv.data.ListExclusions.clear(repo, r.id); catMenu = null
+                    })
                     if (settings.hubOrder.isNotBlank() || settings.hubHidden.isNotBlank()) {
                         MenuRow("Volver al orden original y mostrar todas", Ic.Refresh, onClick = {
                             repo.prefs.update { it.copy(hubOrder = "", hubHidden = "") }; catMenu = null
@@ -267,7 +275,12 @@ private fun MovieHubView(type: String, onServer: () -> Unit) {
                                 meta = itemMeta(item), watched = item.stableKey in watched,
                                 position = if (row?.numbered == true) i + 1 else null,
                                 onClick = { nav.openItem(item) },
-                                onLongClick = { nav.showMenu(MenuRequest(item.toRef())) },
+                                onLongClick = {
+                                    val r = row
+                                    nav.showMenu(MenuRequest(item.toRef(), extra = if (r == null) emptyList() else listOf(
+                                        "No mostrar en «${r.title}»" to { app.butaca.tv.data.ListExclusions.hide(repo, r.id, item.stableKey) }
+                                    )))
+                                },
                             )
                         }
                     }

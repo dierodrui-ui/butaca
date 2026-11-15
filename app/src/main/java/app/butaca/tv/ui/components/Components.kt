@@ -166,26 +166,29 @@ fun ActionButton(
     height: Dp = 42.dp,
     /** Color de estado (vista = verde, favorito = rojo, ver más adelante = amarillo). */
     active: Color? = null,
+    /** Fondo de color siempre, con texto e icono en blanco (para destacar un botón). */
+    solid: Color? = null,
+    compact: Boolean = false,
 ) {
     val onActive = if (active != null && active.luminance() > 0.5f) C.Bg else Color.White
     FocusSurface(
         onClick = onClick,
         modifier = modifier.height(height),
-        radius = 12.dp,
-        container = active?.copy(alpha = 0.22f) ?: if (primary) C.Text else C.Raised,
-        focusedContainer = active ?: if (primary) C.Text else C.Raised,
-        content = active ?: if (primary) C.Bg else C.Text,
-        focusedContent = if (active != null) onActive else if (primary) C.Bg else C.Text,
+        radius = if (compact) 10.dp else 12.dp,
+        container = solid ?: active?.copy(alpha = 0.22f) ?: if (primary) C.Text else C.Raised,
+        focusedContainer = solid ?: active ?: if (primary) C.Text else C.Raised,
+        content = if (solid != null) Color.White else active ?: if (primary) C.Bg else C.Text,
+        focusedContent = if (solid != null) Color.White else if (active != null) onActive else if (primary) C.Bg else C.Text,
         focusedScale = 1.05f,
     ) {
         Row(
-            Modifier.align(Alignment.Center).padding(horizontal = 16.dp),
+            Modifier.align(Alignment.Center).padding(horizontal = if (text.isEmpty()) 0.dp else if (compact) 12.dp else 16.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(if (compact) 6.dp else 8.dp),
         ) {
-            if (icon != null) Icon(icon, null, modifier = Modifier.size(17.dp), tint = androidx.tv.material3.LocalContentColor.current)
-            Text(
-                text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = androidx.tv.material3.LocalContentColor.current,
+            if (icon != null) Icon(icon, null, modifier = Modifier.size(if (compact) 15.dp else 17.dp), tint = androidx.tv.material3.LocalContentColor.current)
+            if (text.isNotEmpty()) Text(
+                text, fontSize = if (compact) 13.sp else 14.sp, fontWeight = FontWeight.SemiBold, color = androidx.tv.material3.LocalContentColor.current,
                 maxLines = 1, softWrap = false,
             )
         }
