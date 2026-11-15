@@ -18,6 +18,8 @@ android {
         targetSdk = 34
         versionCode = runNumber
         versionName = "1.0.$runNumber"
+        // La clave de TMDB llega desde un secreto de GitHub; nunca se escribe en el código
+        buildConfigField("String", "TMDB_KEY", "\"${System.getenv("TMDB_KEY") ?: ""}\"")
         ndk {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a")
         }
@@ -53,6 +55,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
     packaging {
         resources {

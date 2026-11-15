@@ -44,6 +44,7 @@ data class SeriesInfo(
     val backdrop: String?,
     val seasons: List<Int>,
     val episodes: List<Episode>,
+    val tmdbId: String? = null,
 )
 
 data class VodInfo(
@@ -56,6 +57,7 @@ data class VodInfo(
     val rating: Double?,
     val poster: String?,
     val backdrop: String?,
+    val tmdbId: String? = null,
 )
 
 /**
@@ -205,6 +207,7 @@ class XtreamClient(private val http: OkHttpClient) {
             rating = info.optString("rating", "").toDoubleOrNull(),
             poster = info.optStringOrNull("movie_image") ?: info.optStringOrNull("cover_big"),
             backdrop = firstString(info.opt("backdrop_path")),
+            tmdbId = (info.optStringOrNull("tmdb_id") ?: info.optStringOrNull("tmdb"))?.takeIf { it != "0" },
         )
     }
 
@@ -253,6 +256,7 @@ class XtreamClient(private val http: OkHttpClient) {
             backdrop = firstString(info.opt("backdrop_path")),
             seasons = episodes.map { it.season }.distinct().sorted(),
             episodes = episodes,
+            tmdbId = (info.optStringOrNull("tmdb") ?: info.optStringOrNull("tmdb_id"))?.takeIf { it != "0" },
         )
     }
 

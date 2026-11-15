@@ -259,6 +259,7 @@ fun TextInputDialog(
     onDismiss: () -> Unit,
     onDone: (String) -> Unit,
     password: Boolean = false,
+    allowEmpty: Boolean = false,
 ) {
     var text by remember { mutableStateOf(initial) }
     val focus = remember { FocusRequester() }
@@ -268,11 +269,11 @@ fun TextInputDialog(
         TvTextField(
             value = text, onValue = { text = it }, hint = hint,
             modifier = Modifier.focusRequester(focus), password = password,
-            onSubmit = { if (text.isNotBlank()) onDone(text.trim()) },
+            onSubmit = { if (allowEmpty || text.isNotBlank()) onDone(text.trim()) },
         )
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End)) {
             ActionButton("Cancelar", null, onClick = onDismiss, height = 46.dp)
-            ActionButton("Guardar", null, onClick = { if (text.isNotBlank()) onDone(text.trim()) }, primary = true, height = 46.dp)
+            ActionButton("Guardar", null, onClick = { if (allowEmpty || text.isNotBlank()) onDone(text.trim()) }, primary = true, height = 46.dp)
         }
     }
 }

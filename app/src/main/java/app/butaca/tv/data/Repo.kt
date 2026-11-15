@@ -57,10 +57,14 @@ data class PlayRequest(
     val seriesLastEpisodeId: String? = null,
 )
 
+/** Una fila de títulos relacionados en la ficha (saga, director, reparto…). */
+data class RelatedRow(val title: String, val items: List<ItemEntity>)
+
 class Repo(
     val db: ButacaDb,
     val client: XtreamClient,
     val prefs: Prefs,
+    val tmdb: TmdbClient,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val syncMutex = Mutex()
@@ -368,6 +372,14 @@ class Repo(
         val res = LinkedHashMap<String, ItemEntity>()
         db.items().search(q, adult, 300).forEach { res.putIfAbsent(it.key, it) }
         for (v in TextUtil.phraseVariants(q)) db.items().search(v, adult, 150).forEach { res.putIfAbsent(it.key, it) }
+        // Títulos en español y en inglés según TMDB («Bola de Dragón» ↔ «Dragon Ball»)
+        if (tmdb.enabled) {
+            val variants = kotlinx.coroutines.withTimeoutOrNull(3000) { tmdb.titleVariants(query) }.orEmpty()
+            for (v in variants) {
+                val nv = TextUtil.titleKey(v)
+                if (nv.length >= 3 && nv != q) db.items().search(nv, adult, 60).forEach { res.putIfAbsent(it.key, it) }
+            }
+        }
         val tokens = TextUtil.searchTokens(q).take(5)
         if (tokens.isNotEmpty()) {
             val args = ArrayList<Any>()
@@ -462,6 +474,74 @@ class Repo(
         }
         sameCat.forEach { out.putIfAbsent(it.stableKey, it) }
         return collapseVariants(out.values.toList(), item.type).take(12)
+    }
+
+    // ----- Relacionados con TMDB: saga, director, reparto y recomendaciones -----
+    /** Busca en tu servidor los títulos que da TMDB (solo enseñamos lo que puedes ver). */
+    private suspend fun matchTitles(titles: List<TmdbTitle>, exclude: String): List<ItemEntity> {
+        if (titles.isEmpty()) return emptyList()
+        val candidates = titles.map { t ->
+            val keys = ArrayList<String>()
+            val names = listOfNotNull(t.title, t.originalTitle).map { TextUtil.titleKey(it) }.filter { it.isNotBlank() }.distinct()
+            if (t.isTv) {
+                keys += "s:t${t.id}"
+                names.forEach { keys += "s:$it" }
+            } else {
+                keys += "m:t${t.id}"
+                names.forEach { n ->
+                    val y = t.year
+                    if (y != null) { keys += "m:$n|$y"; keys += "m:$n|${y - 1}"; keys += "m:$n|${y + 1}" }
+                    keys += "m:$n|"
+                }
+            }
+            keys
+        }
+        val all = candidates.flatten().distinct()
+        val found = all.chunked(500).flatMap { db.items().byStableKeys(it) }
+            .filter { !it.isAdult && it.stableKey != exclude }
+            .groupBy { it.stableKey }
+        val max = prefs.value.maxQuality
+        val out = LinkedHashMap<String, ItemEntity>()
+        candidates.forEach { keys ->
+            val hit = keys.firstNotNullOfOrNull { found[it] } ?: return@forEach
+            val best = hit.filter { it.quality <= max }.maxByOrNull { it.quality } ?: hit.first()
+            out.putIfAbsent(best.stableKey, best)
+        }
+        return out.values.toList()
+    }
+
+    suspend fun related(item: ItemEntity, serverTmdbId: String?): List<RelatedRow> {
+        if (!tmdb.enabled || item.type == ContentType.LIVE) return emptyList()
+        val isTv = item.type == ContentType.SERIES
+        return try {
+            val fromKey = item.stableKey.substringAfter(":").takeIf { it.startsWith("t") }?.drop(1)?.toIntOrNull()
+            val id = serverTmdbId?.toIntOrNull() ?: fromKey ?: tmdb.findId(isTv, item.name, item.year) ?: return emptyList()
+            val d = tmdb.details(isTv, id) ?: return emptyList()
+            val rows = ArrayList<RelatedRow>()
+            val used = HashSet<String>()
+            fun add(title: String, list: List<ItemEntity>, min: Int = 1) {
+                val fresh = list.filter { it.stableKey !in used }.take(15)
+                if (fresh.size >= min) { rows += RelatedRow(title, fresh); fresh.forEach { used += it.stableKey } }
+            }
+            // Saga
+            d.optJSONObject("belongs_to_collection")?.let { c ->
+                val parts = tmdb.collection(c.optInt("id"))
+                add("Saga: " + c.optString("name").removeSuffix(" - Colección").removeSuffix(" (Colección)"), matchTitles(parts, item.stableKey))
+            }
+            // Director (o creadores en series)
+            tmdb.directors(d, isTv).firstOrNull()?.let { p ->
+                add((if (isTv) "Más de los creadores: " else "Más de ") + p.name, matchTitles(tmdb.personWork(p.id, asDirector = true), item.stableKey))
+            }
+            // Reparto principal
+            tmdb.mainCast(d, isTv, 2).forEach { p ->
+                add("Con " + p.name, matchTitles(tmdb.personWork(p.id, asDirector = false).take(60), item.stableKey))
+            }
+            // Recomendaciones
+            add("Te puede gustar", matchTitles(tmdb.recommendations(d, isTv), item.stableKey))
+            rows
+        } catch (_: Exception) {
+            emptyList()
+        }
     }
 
     // ----- Ir a una carpeta desde otra pantalla -----

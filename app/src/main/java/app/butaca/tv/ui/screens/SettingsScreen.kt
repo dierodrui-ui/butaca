@@ -33,6 +33,7 @@ import app.butaca.tv.ui.components.MenuRow
 import app.butaca.tv.ui.components.PinDialog
 import app.butaca.tv.ui.components.SettingRow
 import app.butaca.tv.ui.components.T
+import app.butaca.tv.ui.components.TextInputDialog
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -52,6 +53,7 @@ fun SettingsScreen(onLogout: () -> Unit) {
     var guarded by remember { mutableStateOf<(() -> Unit)?>(null) }
     var changingPin by remember { mutableStateOf(false) }
     var confirmLogout by remember { mutableStateOf(false) }
+    var editingKey by remember { mutableStateOf(false) }
 
     fun withPin(action: () -> Unit) {
         if (!s.adultHide || unlocked || s.pin.isEmpty()) action() else guarded = action
@@ -165,9 +167,21 @@ fun SettingsScreen(onLogout: () -> Unit) {
                         SettingRow("Actualizar catálogo ahora", "Última actualización: $last. Se hace sola una vez al día.",
                             onClick = { repo.syncInBackground() }, value = "Actualizar")
                     }
+                    item {
+                        val hasKey = s.tmdbKey.isNotBlank() || app.butaca.tv.BuildConfig.TMDB_KEY.isNotBlank()
+                        SettingRow(
+                            "Clave de TMDB",
+                            "Para sagas, director, reparto, recomendaciones y búsqueda en dos idiomas.",
+                            onClick = { editingKey = true },
+                            value = if (s.tmdbKey.isNotBlank()) "Propia" else if (hasKey) "Incluida" else "Añadir",
+                        )
+                    }
                     item { SettingRow("Cerrar sesión", "Tus carpetas y favoritos se quedan guardados en este dispositivo.", onClick = { confirmLogout = true }, value = "Salir") }
                     item {
-                        T("Butaca ${appVersion()} · Las actualizaciones conservan tus carpetas, favoritos y progreso.", size = 13, color = C.Muted, modifier = Modifier.padding(top = 12.dp))
+                        Column(Modifier.padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            T("Butaca ${appVersion()} · Las actualizaciones conservan tus carpetas, favoritos y progreso.", size = 13, color = C.Muted)
+                            T("Datos de películas y series: TMDB (themoviedb.org). Este producto usa la API de TMDB pero no está respaldado ni certificado por TMDB.", size = 12, color = C.Muted)
+                        }
                     }
                 }
             }
@@ -191,6 +205,14 @@ fun SettingsScreen(onLogout: () -> Unit) {
                 else { first = null; false }
             })
         }
+    }
+    if (editingKey) {
+        TextInputDialog(
+            "Clave de TMDB", "Pega o escribe la clave (deja vacío para usar la incluida)", s.tmdbKey,
+            onDismiss = { editingKey = false },
+            onDone = { k -> repo.prefs.update { it.copy(tmdbKey = k.trim()) }; editingKey = false },
+            allowEmpty = true,
+        )
     }
     if (confirmLogout) {
         ConfirmDialog("¿Cerrar sesión?", "Tendrás que volver a escribir el servidor, el usuario y la contraseña.", "Cerrar sesión",

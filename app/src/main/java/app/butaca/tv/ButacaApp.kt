@@ -4,6 +4,7 @@ import android.app.Application
 import app.butaca.tv.data.ButacaDb
 import app.butaca.tv.data.Prefs
 import app.butaca.tv.data.Repo
+import app.butaca.tv.data.TmdbClient
 import app.butaca.tv.data.XtreamClient
 import coil.ImageLoader
 import coil.ImageLoaderFactory
@@ -29,7 +30,9 @@ class ButacaApp : Application(), ImageLoaderFactory {
             .followSslRedirects(true)
             .retryOnConnectionFailure(true)
             .build()
-        repo = Repo(ButacaDb.create(this), XtreamClient(http), Prefs(this))
+        val prefs = Prefs(this)
+        val tmdb = TmdbClient(http, cacheDir) { prefs.value.tmdbKey.trim().ifBlank { BuildConfig.TMDB_KEY } }
+        repo = Repo(ButacaDb.create(this), XtreamClient(http), prefs, tmdb)
     }
 
     override fun newImageLoader(): ImageLoader =

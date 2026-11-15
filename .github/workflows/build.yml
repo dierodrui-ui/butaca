@@ -24,6 +24,8 @@ jobs:
           gradle-version: "8.11.1"
 
       - name: Compilar
+        env:
+          TMDB_KEY: ${{ secrets.TMDB_KEY }}
         run: gradle assembleRelease --no-daemon --stacktrace
 
       - name: Preparar APK

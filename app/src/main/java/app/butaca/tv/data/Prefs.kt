@@ -26,6 +26,7 @@ data class Settings(
     val pin: String = "",
     val relock: Boolean = true,
     val newCatsHidden: Boolean = true,
+    val tmdbKey: String = "",
 ) {
     val loggedIn: Boolean get() = server.isNotBlank() && user.isNotBlank()
     val maxQuality: Int get() = when (quality) { 1 -> 3; 2 -> 2; else -> 4 }
@@ -56,6 +57,7 @@ class Prefs(context: Context) {
         pin = sp.getString("pin", "") ?: "",
         relock = sp.getBoolean("relock", true),
         newCatsHidden = sp.getBoolean("newCatsHidden", true),
+        tmdbKey = sp.getString("tmdbKey", "") ?: "",
     )
 
     @Synchronized
@@ -80,6 +82,7 @@ class Prefs(context: Context) {
             .putString("pin", s.pin)
             .putBoolean("relock", s.relock)
             .putBoolean("newCatsHidden", s.newCatsHidden)
+            .putString("tmdbKey", s.tmdbKey)
             .apply()
         _flow.value = s
     }

@@ -49,6 +49,11 @@ import app.butaca.tv.LocalNav
 import app.butaca.tv.data.ContentType
 import app.butaca.tv.data.Episode
 import app.butaca.tv.data.ItemEntity
+import app.butaca.tv.data.RelatedRow
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
 import app.butaca.tv.data.SeriesInfo
 import app.butaca.tv.data.VodInfo
 import app.butaca.tv.data.toRef
@@ -159,14 +164,20 @@ private fun SecondaryActions(item: ItemEntity, onPicker: () -> Unit) {
     )
 }
 
-/** Fila de títulos parecidos al final de la ficha. */
-private fun LazyListScope.similarRow(similar: List<ItemEntity>) {
+/** Filas de relacionados (TMDB) y, al final, títulos del mismo estilo. */
+private fun LazyListScope.relatedRows(related: List<RelatedRow>, similar: List<ItemEntity>) {
+    related.forEachIndexed { i, row -> posterRow("rel_$i", row.title, row.items) }
+    val shown = related.flatMap { r -> r.items.map { it.stableKey } }.toSet()
+    posterRow("similar", "Del mismo estilo", similar.filter { it.stableKey !in shown })
+}
+
+private fun LazyListScope.posterRow(key: String, title: String, similar: List<ItemEntity>) {
     if (similar.isEmpty()) return
-    item(key = "similar") {
+    item(key = key) {
         val nav = LocalNav.current
         val repo = ButacaApp.repo
         Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 10.dp)) {
-            SectionTitle("Títulos similares", Modifier.padding(start = 6.dp))
+            SectionTitle(title, Modifier.padding(start = 6.dp))
             TvRow {
                 items(similar, key = { it.key }) { s ->
                     LaunchedEffect(s.key) { repo.requestGenre(s) }
@@ -207,6 +218,10 @@ fun MovieScreen(key: String, onBack: () -> Unit) {
     val progress by remember(current.stableKey) { repo.progressOf(current.stableKey) }.collectAsState(initial = null)
     val genre = info?.genre ?: current.genre
     val similar by produceState(emptyList<ItemEntity>(), current.key, genre) { value = repo.similar(current, genre) }
+    val related by produceState(emptyList<RelatedRow>(), current.key) {
+        val tid = withTimeoutOrNull(4000) { snapshotFlow { info }.filterNotNull().first() }?.tmdbId
+        value = repo.related(current, tid)
+    }
     var picker by remember { mutableStateOf(false) }
     val playFocus = remember { FocusRequester() }
     LaunchedEffect(Unit) { delay(200); requestFocusSafely(playFocus) }
@@ -275,7 +290,7 @@ fun MovieScreen(key: String, onBack: () -> Unit) {
                         }
                     }
                 }
-                similarRow(similar)
+                relatedRows(related, similar)
             }
         }
     }
@@ -313,6 +328,10 @@ fun SeriesScreen(key: String, onBack: () -> Unit) {
     val epProgress = epProgressList.associateBy { it.episodeId }
     val genre = info?.genre ?: current.genre
     val similar by produceState(emptyList<ItemEntity>(), current.key, genre) { value = repo.similar(current, genre) }
+    val related by produceState(emptyList<RelatedRow>(), current.key) {
+        val tid = withTimeoutOrNull(5000) { snapshotFlow { info }.filterNotNull().first() }?.tmdbId
+        value = repo.related(current, tid)
+    }
     var picker by remember { mutableStateOf(false) }
     var inList by remember { mutableStateOf(false) }
     val playFocus = remember { FocusRequester() }
@@ -393,7 +412,7 @@ fun SeriesScreen(key: String, onBack: () -> Unit) {
                         EpisodeRow(ep, p?.finished == true, p?.takeIf { !it.finished && it.durationMs > 0 }?.let { it.positionMs.toFloat() / it.durationMs },
                             onClick = { play(ep, p?.takeIf { !it.finished }?.positionMs ?: 0L) })
                     }
-                    similarRow(similar)
+                    relatedRows(related, similar)
                 }
             }
         }
