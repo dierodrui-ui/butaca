@@ -5,6 +5,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
@@ -16,7 +18,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
@@ -32,12 +34,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
@@ -59,10 +59,15 @@ import app.butaca.tv.ui.components.BottomFade
 import app.butaca.tv.ui.components.EmptyState
 import app.butaca.tv.ui.components.FocusSurface
 import app.butaca.tv.ui.components.FolderPicker
-import app.butaca.tv.ui.components.IconButtonTv
+import app.butaca.tv.ui.components.MenuRequest
 import app.butaca.tv.ui.components.Pill
+import app.butaca.tv.ui.components.PivotScope
+import app.butaca.tv.ui.components.PosterCard
 import app.butaca.tv.ui.components.Scrim
+import app.butaca.tv.ui.components.SectionTitle
 import app.butaca.tv.ui.components.T
+import app.butaca.tv.ui.components.TvRow
+import app.butaca.tv.ui.components.itemMeta
 import app.butaca.tv.ui.components.requestFocusSafely
 import coil.compose.AsyncImage
 import kotlinx.coroutines.delay
@@ -78,45 +83,56 @@ private fun durationText(secs: Long): String? {
 }
 
 @Composable
-private fun Backdrop(url: String?) {
-    Box(Modifier.fillMaxSize()) {
+private fun Backdrop(url: String?, modifier: Modifier = Modifier) {
+    Box(modifier) {
         if (url != null) AsyncImage(url, null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
         Scrim(Modifier.fillMaxSize())
-        BottomFade(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(260.dp))
+        BottomFade(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(220.dp))
     }
 }
 
+/** Carpetas en las que está el título; al pulsar una, te lleva a ella. */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun FolderChips(stableKey: String) {
     val repo = ButacaApp.repo
-    val folders by repo.folders().collectAsState(initial = emptyList())
-    val inFolders by repo.foldersOf(stableKey).collectAsState(initial = emptySet())
-    val names = folders.filter { it.id in inFolders }.map { it.name }
+    val nav = LocalNav.current
+    val folders by remember { repo.folders() }.collectAsState(initial = emptyList())
+    val inFolders by remember(stableKey) { repo.foldersOf(stableKey) }.collectAsState(initial = emptySet())
+    val mine = folders.filter { it.id in inFolders }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        T("EN TUS CARPETAS", size = 12, weight = FontWeight.SemiBold, color = C.Muted)
-        if (names.isEmpty()) T("Todavía no está en ninguna carpeta.", size = 14, color = C.Muted)
-        else Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            names.forEach { n ->
-                Row(
-                    Modifier.clip(RoundedCornerShape(999.dp)).background(C.Surface3).padding(horizontal = 12.dp, vertical = 7.dp),
-                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
+        T("EN TUS CARPETAS", size = 11, weight = FontWeight.SemiBold, color = C.Muted)
+        if (mine.isEmpty()) T("Todavía no está en ninguna carpeta.", size = 13, color = C.Muted)
+        else FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            mine.forEach { f ->
+                FocusSurface(
+                    onClick = { nav.openFolder(f.id) },
+                    modifier = Modifier.height(34.dp),
+                    radius = 999.dp, container = C.Surface3, focusedScale = 1.06f,
                 ) {
-                    Icon(Ic.Folder, null, tint = C.Accent, modifier = Modifier.size(15.dp))
-                    T(n, size = 14)
+                    Row(
+                        Modifier.align(Alignment.Center).padding(horizontal = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp),
+                    ) {
+                        val icon = when (f.system) { "later" -> Ic.Clock; "fav" -> Ic.Heart; else -> Ic.Folder }
+                        Icon(icon, null, tint = if (f.system == null) Color(f.color) else C.Accent, modifier = Modifier.size(14.dp))
+                        T(f.name, size = 13, maxLines = 1)
+                        Icon(Ic.Chevron, null, tint = C.Muted, modifier = Modifier.size(12.dp))
+                    }
                 }
             }
         }
     }
 }
 
-/** Botones comunes: ver más adelante, carpeta, favorito, vista. */
+/** Botones comunes: ver más adelante, carpeta, favorito, vista. Todos a la vista. */
 @Composable
 private fun SecondaryActions(item: ItemEntity, onPicker: () -> Unit) {
     val repo = ButacaApp.repo
     val scope = rememberCoroutineScope()
-    val folders by repo.folders().collectAsState(initial = emptyList())
-    val inFolders by repo.foldersOf(item.stableKey).collectAsState(initial = emptySet())
-    val progress by repo.progressOf(item.stableKey).collectAsState(initial = null)
+    val folders by remember { repo.folders() }.collectAsState(initial = emptyList())
+    val inFolders by remember(item.stableKey) { repo.foldersOf(item.stableKey) }.collectAsState(initial = emptySet())
+    val progress by remember(item.stableKey) { repo.progressOf(item.stableKey) }.collectAsState(initial = null)
     val laterId = folders.firstOrNull { it.system == "later" }?.id
     val favId = folders.firstOrNull { it.system == "fav" }?.id
     val inLater = laterId != null && laterId in inFolders
@@ -131,21 +147,43 @@ private fun SecondaryActions(item: ItemEntity, onPicker: () -> Unit) {
     }
     ActionButton("Añadir a carpeta", Ic.FolderPlus, onClick = onPicker)
     if (favId != null) {
-        IconButtonTv(
-            if (inFav) Ic.HeartFilled else Ic.Heart, "Favorito",
+        ActionButton(
+            if (inFav) "En favoritos" else "Favorito", if (inFav) Ic.HeartFilled else Ic.Heart,
             onClick = { scope.launch { repo.toggleFolder(favId, ref, inFav) } },
-            tint = if (inFav) C.Accent else C.Text,
         )
     }
-    IconButtonTv(
-        Ic.Check, if (watched) "Marcar como no vista" else "Marcar como vista",
+    ActionButton(
+        if (watched) "Vista" else "Marcar vista", Ic.Check,
         onClick = { scope.launch { repo.markWatched(ref, !watched) } },
-        tint = if (watched) C.Green else C.Text,
     )
+}
+
+/** Fila de títulos parecidos al final de la ficha. */
+private fun LazyListScope.similarRow(similar: List<ItemEntity>) {
+    if (similar.isEmpty()) return
+    item(key = "similar") {
+        val nav = LocalNav.current
+        val repo = ButacaApp.repo
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 10.dp)) {
+            SectionTitle("Títulos similares", Modifier.padding(start = 6.dp))
+            TvRow {
+                items(similar, key = { it.key }) { s ->
+                    LaunchedEffect(s.key) { repo.requestGenre(s) }
+                    PosterCard(
+                        title = s.name, icon = s.icon, keySeed = s.stableKey, width = 112.dp,
+                        meta = itemMeta(s), isSeries = s.type == ContentType.SERIES,
+                        onClick = { nav.openItem(s) },
+                        onLongClick = { nav.showMenu(MenuRequest(s.toRef())) },
+                    )
+                }
+            }
+        }
+    }
 }
 
 // ============================ Película ============================
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun MovieScreen(key: String, onBack: () -> Unit) {
     val repo = ButacaApp.repo
@@ -158,13 +196,16 @@ fun MovieScreen(key: String, onBack: () -> Unit) {
         val it = item ?: return@produceState
         val acc = repo.account() ?: return@produceState
         value = try { repo.client.vodInfo(acc, it.streamId) } catch (_: Exception) { null }
+        value?.let { v -> repo.saveVodInfo(it, v) }
     }
     val current = item
     if (current == null) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { T("Cargando…", color = C.Muted) }
         return
     }
-    val progress by repo.progressOf(current.stableKey).collectAsState(initial = null)
+    val progress by remember(current.stableKey) { repo.progressOf(current.stableKey) }.collectAsState(initial = null)
+    val genre = info?.genre ?: current.genre
+    val similar by produceState(emptyList<ItemEntity>(), current.key, genre) { value = repo.similar(current, genre) }
     var picker by remember { mutableStateOf(false) }
     val playFocus = remember { FocusRequester() }
     LaunchedEffect(Unit) { delay(200); requestFocusSafely(playFocus) }
@@ -172,46 +213,59 @@ fun MovieScreen(key: String, onBack: () -> Unit) {
     val resumeMs = progress?.takeIf { !it.finished && it.positionMs > 60_000 }?.positionMs ?: 0L
 
     Box(Modifier.fillMaxSize().background(C.Bg)) {
-        Backdrop(info?.backdrop ?: current.backdrop)
-        Column(Modifier.fillMaxSize().padding(horizontal = 60.dp, vertical = 40.dp), verticalArrangement = Arrangement.spacedBy(26.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Icon(Ic.Back, null, tint = C.Muted, modifier = Modifier.size(18.dp))
-                T("Atrás para volver", size = 14, color = C.Muted)
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(40.dp)) {
-                Box(Modifier.width(240.dp).aspectRatio(2f / 3f).clip(RoundedCornerShape(14.dp))) {
-                    Artwork(info?.poster ?: current.icon, current.name, current.stableKey, Modifier.fillMaxSize(), titleSize = 24)
-                }
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                    val genre = info?.genre ?: current.genre
-                    T(listOfNotNull("Película", genre).joinToString(" · "), size = 14, color = C.TextSoft, maxLines = 1)
-                    T(current.name, size = 40, weight = FontWeight.Bold, maxLines = 2, lineHeight = 44)
-                    val meta = listOfNotNull(
-                        current.year?.toString() ?: info?.releaseDate?.take(4),
-                        durationText(info?.durationSecs ?: 0),
-                        ratingText(info?.rating ?: current.rating),
-                    ).joinToString(" · ")
-                    if (meta.isNotBlank()) T(meta, size = 15, color = C.Muted)
-                    val plot = info?.plot ?: current.plot
-                    if (!plot.isNullOrBlank()) T(plot, size = 16, color = C.TextSoft, maxLines = 5, modifier = Modifier.fillMaxWidth(0.85f))
-                    info?.cast?.let { T("Reparto: $it", size = 13, color = C.Muted, maxLines = 1, modifier = Modifier.fillMaxWidth(0.85f)) }
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(vertical = 8.dp)) {
-                        item {
-                            ActionButton(
-                                if (resumeMs > 0) "Continuar (${resumeMs / 60000} min)" else "Reproducir", Ic.Play,
-                                onClick = { scope.launch { repo.playRequestFor(current, resumeMs)?.let { nav.play(it) } } },
-                                primary = true, modifier = Modifier.focusRequester(playFocus),
-                            )
-                        }
-                        if (resumeMs > 0) item {
-                            ActionButton("Desde el principio", null, onClick = {
-                                scope.launch { repo.playRequestFor(current, 0)?.let { nav.play(it) } }
-                            })
-                        }
-                        item { Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) { SecondaryActions(current) { picker = true } } }
+        Backdrop(info?.backdrop ?: current.backdrop, Modifier.fillMaxWidth().height(520.dp))
+        PivotScope(pivot = 80.dp) {
+            LazyColumn(
+                Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(start = 48.dp, end = 48.dp, top = 30.dp, bottom = 60.dp),
+                verticalArrangement = Arrangement.spacedBy(18.dp),
+            ) {
+                item(key = "back") {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Icon(Ic.Back, null, tint = C.Muted, modifier = Modifier.size(16.dp))
+                        T("Atrás para volver", size = 13, color = C.Muted)
                     }
-                    FolderChips(current.stableKey)
                 }
+                item(key = "header") {
+                    Row(horizontalArrangement = Arrangement.spacedBy(32.dp)) {
+                        Box(Modifier.width(200.dp).aspectRatio(2f / 3f).clip(RoundedCornerShape(12.dp))) {
+                            Artwork(info?.poster ?: current.icon, current.name, current.stableKey, Modifier.fillMaxSize(), titleSize = 20)
+                        }
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(11.dp)) {
+                            T(listOfNotNull("Película", genre).joinToString(" · "), size = 13, color = C.TextSoft, maxLines = 1)
+                            T(current.name, size = 32, weight = FontWeight.Bold, maxLines = 2, lineHeight = 36)
+                            val meta = listOfNotNull(
+                                current.year?.toString() ?: info?.releaseDate?.take(4),
+                                durationText(info?.durationSecs ?: 0),
+                                ratingText(info?.rating ?: current.rating),
+                            ).joinToString(" · ")
+                            if (meta.isNotBlank()) T(meta, size = 14, color = C.Muted)
+                            val plot = info?.plot ?: current.plot
+                            if (!plot.isNullOrBlank()) T(plot, size = 14, color = C.TextSoft, maxLines = 4, lineHeight = 20, modifier = Modifier.fillMaxWidth(0.9f))
+                            info?.director?.let { T("Dirección: $it", size = 12, color = C.Muted, maxLines = 1) }
+                            info?.cast?.let { T("Reparto: $it", size = 12, color = C.Muted, maxLines = 1, modifier = Modifier.fillMaxWidth(0.9f)) }
+                            FlowRow(
+                                Modifier.padding(top = 6.dp),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                verticalArrangement = Arrangement.spacedBy(10.dp),
+                            ) {
+                                ActionButton(
+                                    if (resumeMs > 0) "Continuar · min ${resumeMs / 60000}" else "Reproducir", Ic.Play,
+                                    onClick = { scope.launch { repo.playRequestFor(current, resumeMs)?.let { nav.play(it) } } },
+                                    primary = true, modifier = Modifier.focusRequester(playFocus),
+                                )
+                                if (resumeMs > 0) {
+                                    ActionButton("Desde el principio", Ic.Refresh, onClick = {
+                                        scope.launch { repo.playRequestFor(current, 0)?.let { nav.play(it) } }
+                                    })
+                                }
+                                SecondaryActions(current) { picker = true }
+                            }
+                            Box(Modifier.padding(top = 6.dp)) { FolderChips(current.stableKey) }
+                        }
+                    }
+                }
+                similarRow(similar)
             }
         }
     }
@@ -220,12 +274,11 @@ fun MovieScreen(key: String, onBack: () -> Unit) {
 
 // ============================ Serie ============================
 
-@OptIn(ExperimentalComposeUiApi::class)
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun SeriesScreen(key: String, onBack: () -> Unit) {
     val repo = ButacaApp.repo
     val nav = LocalNav.current
-    val scope = rememberCoroutineScope()
     BackHandler { onBack() }
 
     val item by produceState<ItemEntity?>(null, key) { value = repo.itemByKey(key) }
@@ -245,15 +298,16 @@ fun SeriesScreen(key: String, onBack: () -> Unit) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { T("Cargando…", color = C.Muted) }
         return
     }
-    val progress by repo.progressOf(current.stableKey).collectAsState(initial = null)
-    val epProgressList by repo.episodeProgress(current.stableKey).collectAsState(initial = emptyList())
+    val progress by remember(current.stableKey) { repo.progressOf(current.stableKey) }.collectAsState(initial = null)
+    val epProgressList by remember(current.stableKey) { repo.episodeProgress(current.stableKey) }.collectAsState(initial = emptyList())
     val epProgress = epProgressList.associateBy { it.episodeId }
+    val genre = info?.genre ?: current.genre
+    val similar by produceState(emptyList<ItemEntity>(), current.key, genre) { value = repo.similar(current, genre) }
     var picker by remember { mutableStateOf(false) }
     val playFocus = remember { FocusRequester() }
     val listState = rememberLazyListState()
 
     val episodes = info?.episodes.orEmpty()
-    // Siguiente episodio a ver
     val nextIdx = run {
         val lastId = progress?.episodeId ?: return@run 0
         val i = episodes.indexOfFirst { it.id == lastId }
@@ -271,36 +325,39 @@ fun SeriesScreen(key: String, onBack: () -> Unit) {
     }
 
     Box(Modifier.fillMaxSize().background(C.Bg)) {
-        Box(Modifier.fillMaxWidth().height(460.dp)) { Backdrop(info?.backdrop ?: current.backdrop) }
-        LazyColumn(
-            Modifier.fillMaxSize(),
-            state = listState,
-            contentPadding = PaddingValues(start = 60.dp, end = 60.dp, top = 40.dp, bottom = 60.dp),
-            verticalArrangement = Arrangement.spacedBy(18.dp),
-        ) {
-            item(key = "header") {
-                Column(verticalArrangement = Arrangement.spacedBy(14.dp), modifier = Modifier.fillMaxWidth(0.7f)) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Icon(Ic.Back, null, tint = C.Muted, modifier = Modifier.size(18.dp))
-                        T("Atrás para volver", size = 14, color = C.Muted)
+        Backdrop(info?.backdrop ?: current.backdrop, Modifier.fillMaxWidth().height(460.dp))
+        PivotScope(pivot = 80.dp) {
+            LazyColumn(
+                Modifier.fillMaxSize(),
+                state = listState,
+                contentPadding = PaddingValues(start = 48.dp, end = 48.dp, top = 30.dp, bottom = 60.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                item(key = "header") {
+                    Column(verticalArrangement = Arrangement.spacedBy(11.dp), modifier = Modifier.fillMaxWidth(0.72f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Icon(Ic.Back, null, tint = C.Muted, modifier = Modifier.size(16.dp))
+                            T("Atrás para volver", size = 13, color = C.Muted)
+                        }
+                        T(listOfNotNull("Serie", genre).joinToString(" · "), size = 13, color = C.TextSoft, maxLines = 1)
+                        T(current.name, size = 32, weight = FontWeight.Bold, maxLines = 2, lineHeight = 36)
+                        val seasons = info?.seasons?.size ?: 0
+                        val meta = listOfNotNull(
+                            current.year?.toString() ?: info?.releaseDate?.take(4),
+                            if (seasons > 0) (if (seasons == 1) "1 temporada" else "$seasons temporadas") else null,
+                            ratingText(info?.rating ?: current.rating),
+                        ).joinToString(" · ")
+                        if (meta.isNotBlank()) T(meta, size = 14, color = C.Muted)
+                        val plot = info?.plot ?: current.plot
+                        if (!plot.isNullOrBlank()) T(plot, size = 14, color = C.TextSoft, maxLines = 3, lineHeight = 20)
+                        info?.cast?.let { T("Reparto: $it", size = 12, color = C.Muted, maxLines = 1) }
                     }
-                    val genre = info?.genre ?: current.genre
-                    T(listOfNotNull("Serie", genre).joinToString(" · "), size = 14, color = C.TextSoft, maxLines = 1)
-                    T(current.name, size = 40, weight = FontWeight.Bold, maxLines = 2, lineHeight = 44)
-                    val seasons = info?.seasons?.size ?: 0
-                    val meta = listOfNotNull(
-                        current.year?.toString() ?: info?.releaseDate?.take(4),
-                        if (seasons > 0) (if (seasons == 1) "1 temporada" else "$seasons temporadas") else null,
-                        ratingText(info?.rating ?: current.rating),
-                    ).joinToString(" · ")
-                    if (meta.isNotBlank()) T(meta, size = 15, color = C.Muted)
-                    val plot = info?.plot ?: current.plot
-                    if (!plot.isNullOrBlank()) T(plot, size = 16, color = C.TextSoft, maxLines = 3)
                 }
-            }
-            item(key = "actions") {
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(vertical = 8.dp)) {
-                    item {
+                item(key = "actions") {
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
                         val label = when {
                             info == null && !failed -> "Cargando episodios…"
                             nextEp == null -> "Sin episodios"
@@ -308,24 +365,25 @@ fun SeriesScreen(key: String, onBack: () -> Unit) {
                             else -> "Continuar · T${nextEp.season} E${nextEp.number}"
                         }
                         ActionButton(label, Ic.Play, onClick = { nextEp?.let { play(it, nextResume) } }, primary = true, modifier = Modifier.focusRequester(playFocus))
-                    }
-                    item { Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) { SecondaryActions(current) { picker = true } } }
-                }
-            }
-            item(key = "chips") { FolderChips(current.stableKey) }
-            if (failed) item(key = "failed") { EmptyState("No se han podido cargar los episodios", "Comprueba la conexión y vuelve a entrar.") }
-            val seasons = info?.seasons.orEmpty()
-            if (seasons.size > 1) {
-                item(key = "seasons") {
-                    LazyRow(Modifier.focusRestorer(), horizontalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(vertical = 6.dp)) {
-                        items(seasons) { s -> Pill("Temporada $s", s == season, { season = s }) }
+                        SecondaryActions(current) { picker = true }
                     }
                 }
-            }
-            items(episodes.filter { it.season == season }, key = { it.id }) { ep ->
-                val p = epProgress[ep.id]
-                EpisodeRow(ep, p?.finished == true, p?.takeIf { !it.finished && it.durationMs > 0 }?.let { it.positionMs.toFloat() / it.durationMs },
-                    onClick = { play(ep, p?.takeIf { !it.finished }?.positionMs ?: 0L) })
+                item(key = "chips") { FolderChips(current.stableKey) }
+                if (failed) item(key = "failed") { EmptyState("No se han podido cargar los episodios", "Comprueba la conexión y vuelve a entrar.") }
+                val seasons = info?.seasons.orEmpty()
+                if (seasons.size > 1) {
+                    item(key = "seasons") {
+                        TvRow(gap = 8.dp) {
+                            items(seasons) { s -> Pill("Temporada $s", s == season, { season = s }, small = true) }
+                        }
+                    }
+                }
+                items(episodes.filter { it.season == season }, key = { it.id }) { ep ->
+                    val p = epProgress[ep.id]
+                    EpisodeRow(ep, p?.finished == true, p?.takeIf { !it.finished && it.durationMs > 0 }?.let { it.positionMs.toFloat() / it.durationMs },
+                        onClick = { play(ep, p?.takeIf { !it.finished }?.positionMs ?: 0L) })
+                }
+                similarRow(similar)
             }
         }
     }
@@ -336,12 +394,12 @@ fun SeriesScreen(key: String, onBack: () -> Unit) {
 private fun EpisodeRow(ep: Episode, watched: Boolean, progress: Float?, onClick: () -> Unit) {
     FocusSurface(
         onClick = onClick,
-        modifier = Modifier.fillMaxWidth().height(110.dp),
+        modifier = Modifier.fillMaxWidth(0.85f).height(92.dp),
         radius = 12.dp, container = C.Surface, focusedContainer = C.Raised, focusedScale = 1.01f,
     ) {
-        Row(Modifier.fillMaxSize().padding(10.dp), horizontalArrangement = Arrangement.spacedBy(18.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxSize().padding(8.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.fillMaxHeight().aspectRatio(16f / 9f).clip(RoundedCornerShape(8.dp))) {
-                Artwork(ep.image, "E${ep.number}", ep.id, Modifier.fillMaxSize(), titleSize = 18)
+                Artwork(ep.image, "E${ep.number}", ep.id, Modifier.fillMaxSize(), titleSize = 16)
                 if (progress != null) {
                     Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(4.dp).background(Color(0x2EFFFFFF))) {
                         Box(Modifier.fillMaxWidth(progress.coerceIn(0f, 1f)).height(4.dp).background(C.Accent))
@@ -349,15 +407,15 @@ private fun EpisodeRow(ep: Episode, watched: Boolean, progress: Float?, onClick:
                 }
                 if (watched) {
                     Box(
-                        Modifier.align(Alignment.TopEnd).padding(6.dp).size(22.dp).clip(CircleShape).background(C.Green),
+                        Modifier.align(Alignment.TopEnd).padding(5.dp).size(20.dp).clip(CircleShape).background(C.Green),
                         contentAlignment = Alignment.Center,
-                    ) { Icon(Ic.Check, "Visto", tint = C.Bg, modifier = Modifier.size(14.dp)) }
+                    ) { Icon(Ic.Check, "Visto", tint = C.Bg, modifier = Modifier.size(13.dp)) }
                 }
             }
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                T("${ep.number}. ${ep.title}", size = 16, weight = FontWeight.SemiBold, maxLines = 1)
-                if (!ep.plot.isNullOrBlank()) T(ep.plot, size = 13, color = C.Muted, maxLines = 2)
-                durationText(ep.durationSecs)?.let { T(it, size = 12, color = C.Muted) }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                T("${ep.number}. ${ep.title}", size = 15, weight = FontWeight.SemiBold, maxLines = 1)
+                if (!ep.plot.isNullOrBlank()) T(ep.plot, size = 12, color = C.Muted, maxLines = 2)
+                durationText(ep.durationSecs)?.let { T(it, size = 11, color = C.Muted) }
             }
         }
     }

@@ -57,6 +57,7 @@ import app.butaca.tv.ui.components.MenuRow
 import app.butaca.tv.ui.components.PinDialog
 import app.butaca.tv.ui.components.PosterCard
 import app.butaca.tv.ui.components.T
+import app.butaca.tv.ui.components.itemMeta
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
@@ -75,7 +76,7 @@ fun CatalogScreen(type: String) {
 
     val allCats by remember(type) { repo.db.categories().observe(type) }.collectAsState(initial = emptyList())
     val showAdult by repo.showAdult.collectAsState(initial = false)
-    val watched by repo.watchedKeys().collectAsState(initial = emptySet())
+    val watched by remember() { repo.watchedKeys() }.collectAsState(initial = emptySet())
     val visibleCats = allCats.filter { !it.hidden && (showAdult || !it.isAdult) }
     val hasLockedAdult = !showAdult && allCats.any { it.isAdult && !it.hidden }
     val unlocked by repo.adultUnlocked.collectAsState()
@@ -112,9 +113,9 @@ fun CatalogScreen(type: String) {
     Row(Modifier.fillMaxSize()) {
         // ---------- Categorías ----------
         Column(
-            Modifier.width(290.dp).fillMaxHeight().background(C.Panel).padding(top = 28.dp, start = 14.dp, end = 14.dp),
+            Modifier.width(250.dp).fillMaxHeight().background(C.Panel).padding(top = 24.dp, start = 12.dp, end = 12.dp),
         ) {
-            T(typeName, size = 26, weight = FontWeight.SemiBold, modifier = Modifier.padding(start = 12.dp, bottom = 14.dp))
+            T(typeName, size = 22, weight = FontWeight.SemiBold, modifier = Modifier.padding(start = 12.dp, bottom = 12.dp))
             LazyColumn(
                 Modifier.weight(1f).focusRestorer(),
                 verticalArrangement = Arrangement.spacedBy(2.dp),
@@ -153,10 +154,14 @@ fun CatalogScreen(type: String) {
         }
 
         // ---------- Contenido ----------
-        Column(Modifier.weight(1f).fillMaxHeight().padding(start = 32.dp, end = 32.dp, top = 30.dp)) {
-            Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.padding(bottom = 18.dp)) {
-                T(title, size = 28, weight = FontWeight.SemiBold, maxLines = 1)
-                T(if (entries.size == 1) "1 título" else "${entries.size} títulos", size = 14, color = C.Muted)
+        Column(Modifier.weight(1f).fillMaxHeight().padding(start = 28.dp, end = 28.dp, top = 24.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+            ) {
+                T(title, size = 22, weight = FontWeight.SemiBold, maxLines = 1, modifier = Modifier.weight(1f, fill = false))
+                T(if (entries.size == 1) "1 título" else "${entries.size} títulos", size = 13, color = C.Muted, maxLines = 1)
             }
             if (entries.isEmpty()) {
                 EmptyState(
@@ -173,17 +178,19 @@ fun CatalogScreen(type: String) {
                 }
             } else {
                 LazyVerticalGrid(
-                    columns = GridCells.Adaptive(140.dp),
+                    columns = GridCells.Adaptive(104.dp),
                     modifier = Modifier.fillMaxSize().focusRestorer(),
-                    horizontalArrangement = Arrangement.spacedBy(20.dp),
-                    verticalArrangement = Arrangement.spacedBy(20.dp),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
                     contentPadding = PaddingValues(bottom = 40.dp, top = 6.dp, start = 6.dp, end = 6.dp),
                 ) {
                     items(entries, key = { it.key }) { e ->
                         val ref = e.ref
+                        val item = (e as? RefOrItem.Item)?.item
+                        if (item != null) LaunchedEffect(item.key) { repo.requestGenre(item) }
                         PosterCard(
-                            title = ref.title, icon = ref.icon, keySeed = ref.stableKey, width = 150.dp,
-                            meta = listOfNotNull(ref.year?.toString(), ref.rating?.let { "★ " + String.format("%.1f", it).replace('.', ',') }).joinToString(" · ").ifBlank { null },
+                            title = ref.title, icon = ref.icon, keySeed = ref.stableKey, width = null,
+                            meta = if (item != null) itemMeta(item) else itemMeta(null, ref.year, ref.rating),
                             isSeries = ref.isSeries, watched = ref.stableKey in watched, unavailable = ref.itemKey == null,
                             onClick = { e.open(nav) },
                             onLongClick = { nav.showMenu(MenuRequest(ref)) },
@@ -244,7 +251,7 @@ private fun ChannelRow(e: RefOrItem) {
     FocusSurface(
         onClick = { e.open(nav) },
         onLongClick = { nav.showMenu(MenuRequest(ref)) },
-        modifier = Modifier.fillMaxWidth().height(64.dp),
+        modifier = Modifier.fillMaxWidth().height(56.dp),
         radius = 12.dp, container = C.Surface, focusedContainer = C.Raised, focusedScale = 1.02f,
     ) {
         Row(
@@ -263,7 +270,7 @@ private fun ChannelRow(e: RefOrItem) {
                     T(ref.title.take(2).uppercase(), size = 14, weight = FontWeight.Bold, modifier = Modifier.align(Alignment.Center))
                 }
             }
-            T(ref.title, size = 16, weight = FontWeight.SemiBold, maxLines = 1, modifier = Modifier.weight(1f))
+            T(ref.title, size = 15, weight = FontWeight.SemiBold, maxLines = 1, modifier = Modifier.weight(1f))
             when (quality) {
                 4 -> Badge("4K")
                 3 -> Badge("FHD")

@@ -1,6 +1,15 @@
 package app.butaca.tv.ui.components
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.gestures.BringIntoViewSpec
+import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
+import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.focus.focusRestorer
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -122,7 +131,7 @@ fun SectionTitle(text: String, modifier: Modifier = Modifier, icon: ImageVector?
 fun Pill(text: String, selected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier, small: Boolean = false) {
     FocusSurface(
         onClick = onClick,
-        modifier = modifier.height(if (small) 32.dp else 38.dp),
+        modifier = modifier.height(if (small) 28.dp else 34.dp),
         radius = 999.dp,
         container = if (selected) C.Text else Color.Transparent,
         focusedContainer = if (selected) C.Text else C.Raised,
@@ -132,7 +141,7 @@ fun Pill(text: String, selected: Boolean, onClick: () -> Unit, modifier: Modifie
         focusedScale = 1.05f,
     ) {
         T(
-            text, size = if (small) 13 else 14, weight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+            text, size = if (small) 12 else 13, weight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
             color = androidx.tv.material3.LocalContentColor.current,
             modifier = Modifier.align(Alignment.Center).padding(horizontal = 14.dp),
         )
@@ -146,7 +155,7 @@ fun ActionButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     primary: Boolean = false,
-    height: Dp = 50.dp,
+    height: Dp = 42.dp,
 ) {
     FocusSurface(
         onClick = onClick,
@@ -159,20 +168,23 @@ fun ActionButton(
         focusedScale = 1.05f,
     ) {
         Row(
-            Modifier.align(Alignment.Center).padding(horizontal = 20.dp),
+            Modifier.align(Alignment.Center).padding(horizontal = 16.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            if (icon != null) Icon(icon, null, modifier = Modifier.size(20.dp), tint = androidx.tv.material3.LocalContentColor.current)
-            T(text, size = 16, weight = FontWeight.SemiBold, color = androidx.tv.material3.LocalContentColor.current, maxLines = 1)
+            if (icon != null) Icon(icon, null, modifier = Modifier.size(17.dp), tint = androidx.tv.material3.LocalContentColor.current)
+            Text(
+                text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = androidx.tv.material3.LocalContentColor.current,
+                maxLines = 1, softWrap = false,
+            )
         }
     }
 }
 
 @Composable
 fun IconButtonTv(icon: ImageVector, description: String, onClick: () -> Unit, modifier: Modifier = Modifier, tint: Color = C.Text) {
-    FocusSurface(onClick = onClick, modifier = modifier.size(50.dp), radius = 12.dp, container = C.Raised, focusedScale = 1.08f) {
-        Icon(icon, description, tint = tint, modifier = Modifier.align(Alignment.Center).size(22.dp))
+    FocusSurface(onClick = onClick, modifier = modifier.size(42.dp), radius = 12.dp, container = C.Raised, focusedScale = 1.08f) {
+        Icon(icon, description, tint = tint, modifier = Modifier.align(Alignment.Center).size(19.dp))
     }
 }
 
@@ -219,7 +231,7 @@ fun PosterCard(
     icon: String?,
     keySeed: String,
     modifier: Modifier = Modifier,
-    width: Dp = 132.dp,
+    width: Dp? = 116.dp,
     meta: String? = null,
     isSeries: Boolean = false,
     watched: Boolean = false,
@@ -229,7 +241,7 @@ fun PosterCard(
     onClick: () -> Unit,
     onLongClick: (() -> Unit)? = null,
 ) {
-    Column(modifier.width(width), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Column(if (width != null) modifier.width(width) else modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         FocusSurface(
             onClick = onClick,
             onLongClick = onLongClick,
@@ -257,8 +269,9 @@ fun PosterCard(
                 ) { Icon(Ic.Check, "Vista", tint = C.Bg, modifier = Modifier.size(15.dp)) }
             }
         }
+        Spacer(Modifier.height(2.dp))
         T(title, size = 13, weight = FontWeight.Medium, maxLines = 1, color = if (unavailable) C.Muted else C.Text)
-        if (meta != null) T(meta, size = 12, color = C.Muted, maxLines = 1)
+        if (meta != null) T(meta, size = 11, color = C.Muted, maxLines = 1)
     }
 }
 
@@ -270,7 +283,7 @@ fun WideCard(
     image: String?,
     keySeed: String,
     modifier: Modifier = Modifier,
-    width: Dp = 240.dp,
+    width: Dp = 212.dp,
     progress: Float? = null,
     badge: String? = null,
     onClick: () -> Unit,
@@ -295,8 +308,8 @@ fun WideCard(
             }
         }
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            T(title, size = 15, weight = FontWeight.SemiBold, maxLines = 1)
-            T(subtitle, size = 13, color = C.Muted, maxLines = 1)
+            T(title, size = 14, weight = FontWeight.SemiBold, maxLines = 1)
+            T(subtitle, size = 12, color = C.Muted, maxLines = 1)
         }
     }
 }
@@ -361,7 +374,7 @@ fun MenuRow(
 ) {
     FocusSurface(
         onClick = onClick, onLongClick = onLongClick,
-        modifier = modifier.fillMaxWidth().height(48.dp),
+        modifier = modifier.fillMaxWidth().height(40.dp),
         radius = 10.dp, focusedScale = 1.02f,
         container = if (selected) C.Raised else Color.Transparent,
         focusedContainer = C.Raised,
@@ -372,9 +385,9 @@ fun MenuRow(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            if (icon != null) Icon(icon, null, tint = iconTint, modifier = Modifier.size(20.dp))
+            if (icon != null) Icon(icon, null, tint = iconTint, modifier = Modifier.size(18.dp))
             T(
-                text, size = 15, weight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                text, size = 14, weight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
                 color = androidx.tv.material3.LocalContentColor.current, maxLines = 1, modifier = Modifier.weight(1f),
             )
             if (trailing != null) T(trailing, size = 13, color = C.Muted)
@@ -410,9 +423,67 @@ fun BottomFade(modifier: Modifier = Modifier) {
     Box(modifier.background(Brush.verticalGradient(0f to Color(0x000D1015), 1f to C.Bg)))
 }
 
-@Suppress("unused")
-@Composable
-fun RowScope.Gap(w: Dp) = Spacer(Modifier.width(w))
+/** «Comedia · ★ 7,3» bajo la carátula. */
+fun itemMeta(genre: String?, year: Int?, rating: Double?): String? {
+    val g = app.butaca.tv.data.TextUtil.firstGenre(genre)
+    val r = rating?.let { "★ " + String.format(java.util.Locale("es", "ES"), "%.1f", it) }
+    return listOfNotNull(g ?: year?.toString(), r).joinToString(" · ").ifBlank { null }
+}
 
-@Suppress("unused")
-val NoPadding = PaddingValues(0.dp)
+fun itemMeta(item: app.butaca.tv.data.ItemEntity): String? = itemMeta(item.genre, item.year, item.rating)
+
+// ---------- Desplazamiento al estilo Google TV ----------
+
+/** Coloca el elemento con el foco a una altura fija (para que no queden carátulas cortadas arriba). */
+@OptIn(ExperimentalFoundationApi::class)
+private class PivotSpec(private val pivotPx: Float, private val enabled: () -> Boolean) : BringIntoViewSpec {
+    override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float =
+        if (enabled()) offset - pivotPx else edgeDistance(offset, size, containerSize, 0f)
+}
+
+/** En filas horizontales: lo justo para ver el elemento y un poco del siguiente. */
+@OptIn(ExperimentalFoundationApi::class)
+private class EdgeSpec(private val marginPx: Float) : BringIntoViewSpec {
+    override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float =
+        edgeDistance(offset, size, containerSize, marginPx)
+}
+
+private fun edgeDistance(offset: Float, size: Float, container: Float, margin: Float): Float {
+    val leading = offset - margin
+    val trailing = offset + size + margin - container
+    return when {
+        leading < 0 && trailing > 0 -> 0f
+        leading < 0 -> leading
+        trailing > 0 -> trailing
+        else -> 0f
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun PivotScope(pivot: Dp, enabled: () -> Boolean = { true }, content: @Composable () -> Unit) {
+    val px = with(LocalDensity.current) { pivot.toPx() }
+    val spec = remember(px) { PivotSpec(px, enabled) }
+    CompositionLocalProvider(LocalBringIntoViewSpec provides spec, content = content)
+}
+
+@OptIn(ExperimentalFoundationApi::class, ExperimentalComposeUiApi::class)
+@Composable
+fun TvRow(modifier: Modifier = Modifier, gap: Dp = 18.dp, content: LazyListScope.() -> Unit) {
+    val px = with(LocalDensity.current) { 60.dp.toPx() }
+    val spec = remember(px) { EdgeSpec(px) }
+    CompositionLocalProvider(LocalBringIntoViewSpec provides spec) {
+        LazyRow(
+            modifier.focusRestorer(),
+            horizontalArrangement = Arrangement.spacedBy(gap),
+            contentPadding = PaddingValues(vertical = 10.dp, horizontal = 6.dp),
+            content = content,
+        )
+    }
+}
+
+/** Degradado arriba para que lo que se sale por arriba no se vea cortado de golpe. */
+@Composable
+fun TopFade(modifier: Modifier = Modifier, height: Dp = 48.dp) {
+    Box(modifier.fillMaxWidth().height(height).background(Brush.verticalGradient(0f to C.Bg, 1f to Color(0x000D1015))))
+}

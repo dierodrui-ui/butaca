@@ -40,6 +40,14 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -91,9 +99,9 @@ fun QuickMenu(
     val repo = ButacaApp.repo
     val scope = rememberCoroutineScope()
     val ref = req.ref
-    val folders by repo.foldersOf(ref.stableKey).collectAsState(initial = emptySet())
-    val allFolders by repo.folders().collectAsState(initial = emptyList())
-    val progress by repo.progressOf(ref.stableKey).collectAsState(initial = null)
+    val folders by remember(ref.stableKey) { repo.foldersOf(ref.stableKey) }.collectAsState(initial = emptySet())
+    val allFolders by remember() { repo.folders() }.collectAsState(initial = emptyList())
+    val progress by remember(ref.stableKey) { repo.progressOf(ref.stableKey) }.collectAsState(initial = null)
     val laterId = allFolders.firstOrNull { it.system == "later" }?.id
     val favId = allFolders.firstOrNull { it.system == "fav" }?.id
     val inLater = laterId != null && laterId in folders
@@ -171,8 +179,8 @@ fun QuickMenu(
 fun FolderPicker(ref: ContentRef, onDismiss: () -> Unit) {
     val repo = ButacaApp.repo
     val scope = rememberCoroutineScope()
-    val folders by repo.folders().collectAsState(initial = emptyList())
-    val inFolders by repo.foldersOf(ref.stableKey).collectAsState(initial = emptySet())
+    val folders by remember() { repo.folders() }.collectAsState(initial = emptyList())
+    val inFolders by remember(ref.stableKey) { repo.foldersOf(ref.stableKey) }.collectAsState(initial = emptySet())
     var creating by remember { mutableStateOf(false) }
     val first = remember { FocusRequester() }
     LaunchedEffect(folders.isNotEmpty()) { if (folders.isNotEmpty()) { delay(80); requestFocusSafely(first) } }
@@ -269,6 +277,10 @@ fun TextInputDialog(
     }
 }
 
+/**
+ * Campo de texto para el mando: el teclado solo aparece al pulsar OK,
+ * y al confirmar (✓) se esconde para dejar ver lo que hay debajo.
+ */
 @Composable
 fun TvTextField(
     value: String,
@@ -278,28 +290,39 @@ fun TvTextField(
     password: Boolean = false,
     onSubmit: () -> Unit = {},
     focused: Boolean = false,
+    imeAction: ImeAction = ImeAction.Done,
 ) {
     var hasFocus by remember { mutableStateOf(false) }
+    val keyboard = LocalSoftwareKeyboardController.current
     BasicTextField(
         value = value,
         onValueChange = onValue,
         singleLine = true,
-        textStyle = TextStyle(color = C.Text, fontSize = 17.sp),
+        textStyle = TextStyle(color = C.Text, fontSize = 16.sp),
         cursorBrush = SolidColor(C.Accent),
-        visualTransformation = if (password) androidx.compose.ui.text.input.PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None,
-        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-        keyboardActions = KeyboardActions(onDone = { onSubmit() }, onSearch = { onSubmit() }),
+        visualTransformation = if (password) PasswordVisualTransformation() else VisualTransformation.None,
+        keyboardOptions = KeyboardOptions(imeAction = imeAction, showKeyboardOnFocus = false),
+        keyboardActions = KeyboardActions(
+            onDone = { keyboard?.hide(); onSubmit() },
+            onSearch = { keyboard?.hide(); onSubmit() },
+            onGo = { keyboard?.hide(); onSubmit() },
+        ),
         modifier = modifier
             .fillMaxWidth()
-            .height(54.dp)
+            .height(48.dp)
             .onFocusChanged { hasFocus = it.isFocused }
+            .onPreviewKeyEvent { e ->
+                if (e.type == KeyEventType.KeyUp && (e.key == Key.DirectionCenter || e.key == Key.Enter || e.key == Key.NumPadEnter)) {
+                    keyboard?.show(); true
+                } else false
+            }
             .clip(RoundedCornerShape(10.dp))
             .background(Color(0xFF0F1318))
             .border(if (hasFocus || focused) 2.dp else 1.5.dp, if (hasFocus || focused) C.Accent else C.Border, RoundedCornerShape(10.dp))
             .padding(horizontal = 16.dp),
         decorationBox = { inner ->
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.CenterStart) {
-                if (value.isEmpty()) T(hint, size = 16, color = Color(0xFF7D8696), maxLines = 1)
+                if (value.isEmpty()) T(hint, size = 15, color = Color(0xFF7D8696), maxLines = 1)
                 inner()
             }
         },

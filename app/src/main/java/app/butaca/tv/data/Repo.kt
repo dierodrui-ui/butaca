@@ -183,7 +183,7 @@ class Repo(
             val old = existingCats[key]
             val auto = TextUtil.looksAdult(name)
             CategoryEntity(
-                key = key, type = type, catId = id, name = name, position = i,
+                key = key, type = type, catId = id, name = TextUtil.cleanName(name), position = i,
                 autoAdult = auto,
                 userAdult = old?.userAdult,
                 hidden = old?.hidden ?: false,
@@ -196,10 +196,18 @@ class Repo(
         val catByKey = catEntities.associateBy { it.key }
         val newCatsHidden = prefs.value.newCatsHidden
 
+        // Lo que ya habíamos completado (género, sinopsis…) no se pierde al actualizar
+        val enriched = db.items().enrichments(type).associateBy { it.key }
         var position = 0
         var total = 0
         client.streamList(a, listAction) { batch ->
-            val items = batch.mapNotNull { m -> mapItem(type, m, catByKey, newCatsHidden, stamp, position++) }
+            val items = batch.mapNotNull { m ->
+                val it = mapItem(type, m, catByKey, newCatsHidden, stamp, position++) ?: return@mapNotNull null
+                val e = enriched[it.key]
+                if (e == null) it else it.copy(
+                    genre = it.genre ?: e.genre, plot = it.plot ?: e.plot, backdrop = it.backdrop ?: e.backdrop, enriched = true,
+                )
+            }
             db.items().upsert(items)
             total += items.size
             _sync.value = SyncState(true, "Descargando $label… $total")
@@ -226,7 +234,7 @@ class Repo(
             ContentType.SERIES -> m["series_id"]
             else -> m["stream_id"]
         } ?: return null
-        val name = (m["name"] ?: m["title"] ?: return null).trim()
+        val name = TextUtil.cleanName(m["name"] ?: m["title"] ?: return null)
         val catKey = "$type:${m["category_id"] ?: ""}"
         val cat = cats[catKey]
         val adultFlag = m["is_adult"] == "1" || m["is_adult"].equals("true", true)
@@ -349,12 +357,28 @@ class Repo(
         showAdult.flatMapLatestCompat { adult -> db.items().observeRecent(type, adult, limit) }
             .map { collapseVariants(it, type) }
 
+    /**
+     * Busca la frase tal cual, su traducción (títulos conocidos) y por palabras sueltas
+     * con sus traducciones, para que «bola de dragon» encuentre «Dragon Ball».
+     */
     suspend fun search(query: String): List<ItemEntity> {
         val q = TextUtil.norm(query)
         if (q.length < 2) return emptyList()
-        val res = db.items().search(q, showAdultNow(), 300)
+        val adult = showAdultNow()
+        val res = LinkedHashMap<String, ItemEntity>()
+        db.items().search(q, adult, 300).forEach { res.putIfAbsent(it.key, it) }
+        for (v in TextUtil.phraseVariants(q)) db.items().search(v, adult, 150).forEach { res.putIfAbsent(it.key, it) }
+        val tokens = TextUtil.searchTokens(q).take(5)
+        if (tokens.isNotEmpty()) {
+            val args = ArrayList<Any>()
+            val where = tokens.joinToString(" AND ") { alts ->
+                "(" + alts.joinToString(" OR ") { alt -> args.add("% $alt%"); "(' ' || normName || ' ') LIKE ?" } + ")"
+            }
+            val sql = "SELECT * FROM item WHERE $where" + (if (adult) "" else " AND isAdult = 0") + " ORDER BY added DESC LIMIT 300"
+            db.items().raw(androidx.sqlite.db.SimpleSQLiteQuery(sql, args.toTypedArray())).forEach { res.putIfAbsent(it.key, it) }
+        }
         val out = ArrayList<ItemEntity>()
-        val byType = res.groupBy { it.type }
+        val byType = res.values.groupBy { it.type }
         for (t in listOf(ContentType.MOVIE, ContentType.SERIES, ContentType.LIVE)) {
             out += collapseVariants(byType[t].orEmpty(), t)
         }
@@ -392,6 +416,56 @@ class Repo(
         val ordered = (listOf(item) + within + rest).distinctBy { it.key }
         return ordered
     }
+
+    // ----- Completar datos de películas (género bajo la carátula) -----
+    private val enrichQueue = kotlinx.coroutines.channels.Channel<String>(capacity = 400)
+    private val enrichRequested = java.util.Collections.synchronizedSet(HashSet<String>())
+
+    init {
+        repeat(3) {
+            scope.launch {
+                for (streamId in enrichQueue) {
+                    val a = account() ?: continue
+                    try {
+                        val info = client.vodInfo(a, streamId)
+                        db.items().enrich(streamId, info?.genre, info?.plot, info?.backdrop)
+                    } catch (_: Exception) { }
+                }
+            }
+        }
+    }
+
+    /** Pide al servidor el género de una película que se está mostrando, una sola vez. */
+    fun requestGenre(item: ItemEntity) {
+        if (item.type != ContentType.MOVIE || item.enriched || item.genre != null) return
+        if (enrichRequested.add(item.streamId)) enrichQueue.trySend(item.streamId)
+    }
+
+    suspend fun saveVodInfo(item: ItemEntity, info: VodInfo) {
+        db.items().enrich(item.streamId, info.genre, info.plot, info.backdrop)
+    }
+
+    // ----- Títulos similares -----
+    /** Misma saga primero, luego mismo género y, si falta, de la misma categoría. */
+    suspend fun similar(item: ItemEntity, genre: String?): List<ItemEntity> {
+        val out = LinkedHashMap<String, ItemEntity>()
+        val words = TextUtil.titleKey(item.name).split(' ').filter { it.length > 2 && it !in setOf("the", "los", "las", "del") }
+        val prefix = words.take(2).joinToString(" ")
+        if (prefix.length >= 4) db.items().saga(item.type, prefix, item.stableKey).forEach { out.putIfAbsent(it.stableKey, it) }
+        val genres = genre?.split(',', '/', '|')?.map { it.trim() }?.filter { it.length > 2 }.orEmpty()
+        val sameCat = db.items().byCategory(item.categoryKey, item.stableKey)
+        if (genres.isNotEmpty()) {
+            val byGenre = db.items().byGenre(item.type, genres.first(), item.stableKey)
+            // Preferimos los que comparten más géneros
+            byGenre.sortedByDescending { g -> genres.count { gen -> g.genre?.contains(gen, true) == true } }
+                .forEach { out.putIfAbsent(it.stableKey, it) }
+        }
+        sameCat.forEach { out.putIfAbsent(it.stableKey, it) }
+        return collapseVariants(out.values.toList(), item.type).take(12)
+    }
+
+    // ----- Ir a una carpeta desde otra pantalla -----
+    val requestedFolder = MutableStateFlow<Long?>(null)
 
     // ----- Carpetas -----
     suspend fun ensureSystemFolders() {

@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -72,6 +73,11 @@ fun PlayerScreen(req: PlayRequest, onExit: () -> Unit) {
     var currentIndex by remember { mutableStateOf(req.startIndex) }
 
     val state = remember { PlayerState(req.items.size) }
+    var scrubTarget by remember { mutableStateOf<Long?>(null) }
+    var scrubDuration by remember { mutableStateOf(0L) }
+    var backHint by remember { mutableStateOf(false) }
+    var lastBack by remember { mutableStateOf(0L) }
+    var playerView by remember { mutableStateOf<TvPlayerView?>(null) }
 
     val player = remember {
         val renderers = DefaultRenderersFactory(context)
@@ -194,16 +200,47 @@ fun PlayerScreen(req: PlayRequest, onExit: () -> Unit) {
         }
     }
 
-    BackHandler { onExit() }
+    // Atrás: primero oculta los controles; para salir hay que pulsarlo dos veces
+    BackHandler {
+        val now = System.currentTimeMillis()
+        when {
+            scrubTarget != null -> scrubTarget = null
+            controlsVisible -> playerView?.hideController()
+            now - lastBack < 2500 -> onExit()
+            else -> { lastBack = now; backHint = true }
+        }
+    }
+    LaunchedEffect(lastBack) { if (backHint) { delay(2500); backHint = false } }
+
+    // Al soltar la flecha, salta al punto elegido
+    LaunchedEffect(scrubTarget) {
+        val t = scrubTarget ?: return@LaunchedEffect
+        delay(650)
+        if (scrubTarget == t) {
+            player.seekTo(t)
+            scrubTarget = null
+        }
+    }
 
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         AndroidView(
             factory = { ctx ->
-                PlayerView(ctx).apply {
+                TvPlayerView(ctx).apply {
                     layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
                     this.player = player
                     useController = true
-                    controllerShowTimeoutMs = 4000
+                    controllerShowTimeoutMs = 3000
+                    // Menos sombra sobre la imagen
+                    findViewById<View>(androidx.media3.ui.R.id.exo_controls_background)?.setBackgroundColor(0x33000000)
+                    canScrub = { player.isCurrentMediaItemSeekable && !player.isCurrentMediaItemLive && player.duration > 0 }
+                    onScrub = { delta ->
+                        val dur = player.duration
+                        val base = scrubTarget ?: player.currentPosition
+                        scrubDuration = dur
+                        scrubTarget = (base + delta).coerceIn(0L, (dur - 1000).coerceAtLeast(0L))
+                    }
+                    onScrubEnd = { }
+                    playerView = this
                     keepScreenOn = true
                     setShowSubtitleButton(true)
                     setShowNextButton(req.items.size > 1)
@@ -217,11 +254,34 @@ fun PlayerScreen(req: PlayRequest, onExit: () -> Unit) {
             modifier = Modifier.fillMaxSize(),
         )
 
-        if (controlsVisible) {
+        scrubTarget?.let { target ->
+            val d = scrubDuration.coerceAtLeast(1L)
+            Column(
+                Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                    .background(Brush.verticalGradient(0f to Color.Transparent, 1f to Color(0x99000000)))
+                    .padding(horizontal = 48.dp, vertical = 30.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                T("${formatTime(target)}  /  ${formatTime(d)}", size = 26, weight = FontWeight.Bold)
+                Box(Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)).background(Color(0x55FFFFFF))) {
+                    Box(Modifier.fillMaxWidth((target.toFloat() / d).coerceIn(0f, 1f)).height(6.dp).background(UiC.Accent))
+                }
+                T("Mantén la flecha para ir más rápido · suelta para saltar", size = 13, color = UiC.TextSoft)
+            }
+        }
+
+        if (backHint) {
+            Box(
+                Modifier.align(Alignment.TopEnd).padding(28.dp).clip(RoundedCornerShape(12.dp))
+                    .background(Color(0xE6171B22)).padding(horizontal = 18.dp, vertical = 12.dp)
+            ) { T("Pulsa Atrás otra vez para salir", size = 15, weight = FontWeight.SemiBold) }
+        }
+
+        if (controlsVisible && scrubTarget == null) {
             val item = req.items.getOrNull(currentIndex)
             Column(
                 Modifier.fillMaxWidth()
-                    .background(Brush.verticalGradient(0f to Color(0xCC000000), 1f to Color.Transparent))
+                    .background(Brush.verticalGradient(0f to Color(0x99000000), 1f to Color.Transparent))
                     .padding(horizontal = 48.dp, vertical = 30.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
@@ -253,6 +313,14 @@ fun PlayerScreen(req: PlayRequest, onExit: () -> Unit) {
             }
         }
     }
+}
+
+private fun formatTime(ms: Long): String {
+    val total = ms / 1000
+    val h = total / 3600
+    val m = (total % 3600) / 60
+    val s = total % 60
+    return if (h > 0) String.format("%d:%02d:%02d", h, m, s) else String.format("%d:%02d", m, s)
 }
 
 private class PlayerState(size: Int) {

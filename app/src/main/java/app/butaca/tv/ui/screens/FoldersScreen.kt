@@ -21,6 +21,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -66,9 +67,9 @@ import kotlinx.coroutines.launch
 
 private const val CONTINUE = "continue"
 private const val WATCHED = "watched"
-private const val COLS = 6
+private const val COLS = 7
 
-private enum class SortMode(val label: String) { MINE("Mi orden"), ADDED("Añadido recientemente"), NAME("Nombre (A–Z)"), RATING("Valoración") }
+private enum class SortMode(val label: String) { MINE("Mi orden"), ADDED("Recientes"), NAME("A–Z"), RATING("Nota") }
 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
@@ -77,17 +78,23 @@ fun FoldersScreen() {
     val nav = LocalNav.current
     val scope = rememberCoroutineScope()
 
-    val folders by repo.folders().collectAsState(initial = emptyList())
-    val counts by repo.folderCounts().collectAsState(initial = emptyMap())
-    val continueRefs by repo.continueRefs().collectAsState(initial = emptyList())
-    val watchedRefs by repo.watchedRefs().collectAsState(initial = emptyList())
-    val watchedKeys by repo.watchedKeys().collectAsState(initial = emptySet())
+    val folders by remember() { repo.folders() }.collectAsState(initial = emptyList())
+    val counts by remember() { repo.folderCounts() }.collectAsState(initial = emptyMap())
+    val continueRefs by remember() { repo.continueRefs() }.collectAsState(initial = emptyList())
+    val watchedRefs by remember() { repo.watchedRefs() }.collectAsState(initial = emptyList())
+    val watchedKeys by remember() { repo.watchedKeys() }.collectAsState(initial = emptySet())
 
     val later = folders.firstOrNull { it.system == "later" }
     val fav = folders.firstOrNull { it.system == "fav" }
     val userFolders = folders.filter { it.system == null }
 
-    var selected by remember { mutableStateOf<String?>(null) }
+    var selected by remember { mutableStateOf<String?>(repo.requestedFolder.value?.let { "f:$it" }) }
+    val requested by repo.requestedFolder.collectAsState()
+    LaunchedEffect(requested) {
+        val id = requested ?: return@LaunchedEffect
+        selected = "f:$id"
+        repo.requestedFolder.value = null
+    }
     val sel = selected ?: later?.let { "f:${it.id}" } ?: CONTINUE
     val selFolder: FolderEntity? = if (sel.startsWith("f:")) folders.firstOrNull { "f:${it.id}" == sel } else null
 
@@ -130,8 +137,8 @@ fun FoldersScreen() {
 
     Row(Modifier.fillMaxSize()) {
         // ---------- Listas ----------
-        Column(Modifier.width(280.dp).fillMaxHeight().background(C.Panel).padding(top = 28.dp, start = 14.dp, end = 14.dp)) {
-            T("Mis carpetas", size = 24, weight = FontWeight.SemiBold, modifier = Modifier.padding(start = 12.dp, bottom = 12.dp))
+        Column(Modifier.width(250.dp).fillMaxHeight().background(C.Panel).padding(top = 24.dp, start = 12.dp, end = 12.dp)) {
+            T("Mis carpetas", size = 22, weight = FontWeight.SemiBold, modifier = Modifier.padding(start = 12.dp, bottom = 10.dp))
             LazyColumn(Modifier.weight(1f).focusRestorer(), verticalArrangement = Arrangement.spacedBy(2.dp), contentPadding = PaddingValues(bottom = 30.dp)) {
                 item { T("AUTOMÁTICAS", size = 11, weight = FontWeight.Bold, color = C.Faint, modifier = Modifier.padding(start = 12.dp, top = 4.dp, bottom = 6.dp)) }
                 item {
@@ -174,17 +181,17 @@ fun FoldersScreen() {
         }
 
         // ---------- Contenido ----------
-        Column(Modifier.weight(1f).fillMaxHeight().padding(start = 32.dp, end = 32.dp, top = 28.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            Row(verticalAlignment = Alignment.Top) {
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        T(title, size = 30, weight = FontWeight.SemiBold, maxLines = 1)
-                        T(if (filtered.size == 1) "1 título" else "${filtered.size} títulos", size = 14, color = C.Muted)
+        Column(Modifier.weight(1f).fillMaxHeight().padding(start = 28.dp, end = 28.dp, top = 24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        T(title, size = 24, weight = FontWeight.SemiBold, maxLines = 1, modifier = Modifier.weight(1f, fill = false))
+                        T(if (filtered.size == 1) "1 título" else "${filtered.size} títulos", size = 13, color = C.Muted, maxLines = 1)
                     }
-                    T(subtitle, size = 14, color = C.Muted)
+                    T(subtitle, size = 13, color = C.Muted, maxLines = 1)
                 }
                 if (selFolder != null && selFolder.system == null) {
-                    ActionButton("Editar carpeta", Ic.Edit, onClick = { editing = selFolder }, height = 42.dp)
+                    ActionButton("Editar carpeta", Ic.Edit, onClick = { editing = selFolder })
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -194,9 +201,9 @@ fun FoldersScreen() {
                 if (selFolder?.system == "fav") Pill("Canales", filter == ContentType.LIVE, { filter = ContentType.LIVE })
                 Spacer(Modifier.weight(1f))
                 if (selFolder != null) {
-                    ActionButton("Ordenar: ${sort.label}", Ic.Sort, onClick = {
+                    ActionButton("Orden: ${sort.label}", Ic.Sort, onClick = {
                         sort = SortMode.entries[(sort.ordinal + 1) % SortMode.entries.size]
-                    }, height = 40.dp)
+                    }, height = 38.dp)
                 }
             }
             if (moving != null) {
@@ -235,13 +242,13 @@ fun FoldersScreen() {
                         scope.launch { repo.moveInFolder(folderId, key, delta) }
                         true
                     },
-                    horizontalArrangement = Arrangement.spacedBy(20.dp),
-                    verticalArrangement = Arrangement.spacedBy(18.dp),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
                     contentPadding = PaddingValues(bottom = 40.dp, top = 6.dp, start = 6.dp, end = 6.dp),
                 ) {
                     itemsIndexed(sorted, key = { _, r -> r.stableKey }) { i, ref ->
                         PosterCard(
-                            title = ref.title, icon = ref.icon, keySeed = ref.stableKey, width = 150.dp,
+                            title = ref.title, icon = ref.icon, keySeed = ref.stableKey, width = null,
                             meta = if (ref.itemKey == null) "Ya no está en el servidor"
                             else listOfNotNull(ref.year?.toString(), ref.rating?.let { "★ " + String.format("%.1f", it).replace('.', ',') }).joinToString(" · ").ifBlank { null },
                             isSeries = ref.isSeries,

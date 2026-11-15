@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -55,6 +56,8 @@ private fun Tab.icon(): ImageVector = when (this) {
 fun MainScreen(onLogout: () -> Unit) {
     var tab by rememberSaveable { mutableStateOf(Tab.HOME) }
     BackHandler(enabled = tab != Tab.HOME) { tab = Tab.HOME }
+    val requested by ButacaApp.repo.requestedFolder.collectAsState()
+    LaunchedEffect(requested) { if (requested != null) tab = Tab.FOLDERS }
 
     Box(Modifier.fillMaxSize().background(C.Bg)) {
         Row(Modifier.fillMaxSize()) {
@@ -80,7 +83,7 @@ fun MainScreen(onLogout: () -> Unit) {
 private fun Rail(current: Tab, onSelect: (Tab) -> Unit) {
     val settings by ButacaApp.repo.prefs.flow.collectAsState()
     Column(
-        Modifier.width(200.dp).fillMaxHeight().background(C.Rail).padding(horizontal = 14.dp, vertical = 26.dp)
+        Modifier.width(190.dp).fillMaxHeight().background(C.Rail).padding(horizontal = 12.dp, vertical = 24.dp)
             .focusRestorer(),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {

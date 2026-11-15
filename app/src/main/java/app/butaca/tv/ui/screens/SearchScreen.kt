@@ -37,6 +37,12 @@ import app.butaca.tv.ui.components.Pill
 import app.butaca.tv.ui.components.PosterCard
 import app.butaca.tv.ui.components.SectionTitle
 import app.butaca.tv.ui.components.T
+import app.butaca.tv.ui.components.PivotScope
+import app.butaca.tv.ui.components.TvRow
+import app.butaca.tv.ui.components.itemMeta
+import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.input.ImeAction
 import app.butaca.tv.ui.components.TvTextField
 import app.butaca.tv.ui.components.requestFocusSafely
 import kotlinx.coroutines.delay
@@ -50,8 +56,9 @@ fun SearchScreen() {
     var results by remember { mutableStateOf<List<ItemEntity>>(emptyList()) }
     var searching by remember { mutableStateOf(false) }
     var filter by remember { mutableStateOf("all") }
-    val watched by repo.watchedKeys().collectAsState(initial = emptySet())
+    val watched by remember() { repo.watchedKeys() }.collectAsState(initial = emptySet())
     val field = remember { FocusRequester() }
+    val focusManager = LocalFocusManager.current
     LaunchedEffect(Unit) { delay(200); requestFocusSafely(field) }
 
     LaunchedEffect(query) {
@@ -66,20 +73,23 @@ fun SearchScreen() {
     val series = results.filter { it.type == ContentType.SERIES }
     val live = results.filter { it.type == ContentType.LIVE }
 
+    PivotScope(pivot = 70.dp) {
     LazyColumn(
         Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 44.dp, end = 44.dp, top = 30.dp, bottom = 60.dp),
-        verticalArrangement = Arrangement.spacedBy(22.dp),
+        contentPadding = PaddingValues(start = 36.dp, end = 36.dp, top = 26.dp, bottom = 80.dp),
+        verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
         item {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                T("Buscar", size = 30, weight = FontWeight.SemiBold)
+                T("Buscar", size = 26, weight = FontWeight.SemiBold)
                 TvTextField(
                     value = query, onValue = { query = it },
-                    hint = "Pulsa OK y escribe, o usa el micrófono del mando",
+                    hint = "Pulsa OK para escribir, o usa el micrófono del mando",
                     modifier = Modifier.fillMaxWidth(0.7f).focusRequester(field),
+                    imeAction = ImeAction.Search,
+                    onSubmit = { focusManager.moveFocus(FocusDirection.Down) },
                 )
-                T("Busca en canales, películas y series a la vez. No importan tildes ni mayúsculas.", size = 13, color = C.Muted)
+                T("Busca en canales, películas y series a la vez, en español y en inglés. Pulsa ✓ o Atrás para cerrar el teclado.", size = 13, color = C.Muted)
             }
         }
         if (query.trim().length >= 2) {
@@ -104,12 +114,13 @@ fun SearchScreen() {
                 item(key = type) {
                     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         SectionTitle(label)
-                        LazyRow(Modifier.focusRestorer(), horizontalArrangement = Arrangement.spacedBy(18.dp), contentPadding = PaddingValues(vertical = 8.dp)) {
+                        TvRow {
                             items(list.take(60), key = { it.key }) { item ->
+                                LaunchedEffect(item.key) { repo.requestGenre(item) }
                                 PosterCard(
                                     title = item.name, icon = item.icon, keySeed = item.stableKey,
-                                    width = if (type == ContentType.LIVE) 120.dp else 132.dp,
-                                    meta = item.year?.toString(),
+                                    width = 112.dp,
+                                    meta = itemMeta(item),
                                     isSeries = type == ContentType.SERIES, watched = item.stableKey in watched,
                                     onClick = { nav.openItem(item) },
                                     onLongClick = { nav.showMenu(MenuRequest(item.toRef())) },
@@ -120,5 +131,6 @@ fun SearchScreen() {
                 }
             }
         }
+    }
     }
 }

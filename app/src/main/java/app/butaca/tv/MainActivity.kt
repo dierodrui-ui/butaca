@@ -18,6 +18,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -44,6 +46,7 @@ class AppNav(
     val play: (PlayRequest) -> Unit,
     val showMenu: (MenuRequest) -> Unit,
     val toast: (String) -> Unit,
+    val openFolder: (Long) -> Unit,
 )
 
 val LocalNav = staticCompositionLocalOf<AppNav> { error("Sin navegación") }
@@ -101,12 +104,23 @@ fun AppRoot() {
             play = { req -> repo.pendingPlay = req; nav.navigate("player") },
             showMenu = { menu = it },
             toast = toast,
+            openFolder = { id ->
+                repo.requestedFolder.value = id
+                nav.popBackStack("main", inclusive = false)
+            },
         )
     }
 
     val start = if (repo.prefs.value.loggedIn) "main" else "login"
 
-    CompositionLocalProvider(LocalNav provides appNav) {
+    // Todo se dibuja como en el diseño: una pantalla de 1280 de ancho, sea cual sea la tele
+    val metrics = context.resources.displayMetrics
+    val tvDensity = remember(metrics.widthPixels, metrics.heightPixels) {
+        val w = maxOf(metrics.widthPixels, metrics.heightPixels)
+        Density(density = w / 1280f, fontScale = 1f)
+    }
+
+    CompositionLocalProvider(LocalNav provides appNav, LocalDensity provides tvDensity) {
         Box(Modifier.fillMaxSize().background(C.Bg)) {
             NavHost(navController = nav, startDestination = start) {
                 composable("login") {

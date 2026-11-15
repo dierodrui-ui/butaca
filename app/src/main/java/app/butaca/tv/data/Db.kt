@@ -4,7 +4,12 @@ import android.content.Context
 import androidx.room.Dao
 import androidx.room.Database
 import androidx.room.Entity
+import androidx.room.ColumnInfo
 import androidx.room.Index
+import androidx.room.RawQuery
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
+import androidx.sqlite.db.SupportSQLiteQuery
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.PrimaryKey
@@ -62,7 +67,10 @@ data class ItemEntity(
     val quality: Int,
     val position: Int,
     val syncStamp: Long,
+    @ColumnInfo(defaultValue = "0") val enriched: Boolean = false,
 )
+
+data class Enrichment(val key: String, val genre: String?, val plot: String?, val backdrop: String?)
 
 @Entity(tableName = "folder")
 data class FolderEntity(
@@ -209,6 +217,27 @@ interface ItemDao {
 
     @Query("SELECT COUNT(*) FROM item")
     suspend fun count(): Int
+
+    @RawQuery
+    suspend fun raw(q: SupportSQLiteQuery): List<ItemEntity>
+
+    @Query("SELECT `key`, genre, plot, backdrop FROM item WHERE type = :type AND enriched = 1")
+    suspend fun enrichments(type: String): List<Enrichment>
+
+    @Query("UPDATE item SET genre = COALESCE(:genre, genre), plot = COALESCE(:plot, plot), backdrop = COALESCE(backdrop, :backdrop), enriched = 1 WHERE type = 'movie' AND streamId = :streamId")
+    suspend fun enrich(streamId: String, genre: String?, plot: String?, backdrop: String?)
+
+    @Query(
+        "SELECT * FROM item WHERE type = :type AND isAdult = 0 AND stableKey != :exclude AND (' ' || normName || ' ') LIKE '% ' || :prefix || '%' " +
+            "ORDER BY year, normName LIMIT 20"
+    )
+    suspend fun saga(type: String, prefix: String, exclude: String): List<ItemEntity>
+
+    @Query("SELECT * FROM item WHERE type = :type AND isAdult = 0 AND stableKey != :exclude AND genre LIKE '%' || :genre || '%' ORDER BY rating DESC LIMIT 40")
+    suspend fun byGenre(type: String, genre: String, exclude: String): List<ItemEntity>
+
+    @Query("SELECT * FROM item WHERE categoryKey = :categoryKey AND isAdult = 0 AND stableKey != :exclude ORDER BY rating DESC LIMIT 40")
+    suspend fun byCategory(categoryKey: String, exclude: String): List<ItemEntity>
 }
 
 data class KeyAdded(val key: String, val added: Long)
@@ -334,7 +363,7 @@ interface MiscDao {
         CategoryEntity::class, ItemEntity::class, FolderEntity::class, FolderItemEntity::class,
         ProgressEntity::class, EpisodeProgressEntity::class, TrackedSeriesEntity::class, AudioPrefEntity::class,
     ],
-    version = 1,
+    version = 2,
     exportSchema = false,
 )
 abstract class ButacaDb : RoomDatabase() {
@@ -347,7 +376,20 @@ abstract class ButacaDb : RoomDatabase() {
     companion object {
         fun create(context: Context): ButacaDb =
             Room.databaseBuilder(context, ButacaDb::class.java, "butaca.db")
+                .addMigrations(MIGRATION_1_2)
                 .fallbackToDestructiveMigrationOnDowngrade()
                 .build()
+
+        /** v2: datos ampliados de películas y nombres sin adornos (⭐) en tus listas. */
+        private val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE item ADD COLUMN enriched INTEGER NOT NULL DEFAULT 0")
+                for (table in listOf("folder_item", "progress", "tracked_series")) {
+                    db.execSQL("UPDATE OR IGNORE $table SET stableKey = REPLACE(REPLACE(stableKey, '⭐ ', ''), '⭐', '')")
+                }
+                db.execSQL("UPDATE OR IGNORE episode_progress SET seriesKey = REPLACE(REPLACE(seriesKey, '⭐ ', ''), '⭐', '')")
+                db.execSQL("UPDATE OR IGNORE audio_pref SET seriesKey = REPLACE(REPLACE(seriesKey, '⭐ ', ''), '⭐', '')")
+            }
+        }
     }
 }

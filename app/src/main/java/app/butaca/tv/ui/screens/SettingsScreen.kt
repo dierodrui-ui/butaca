@@ -207,7 +207,7 @@ private fun Header(text: String) {
 private fun CategoriesList(onlyAdult: Boolean, onToggleOnly: () -> Unit, withPin: (() -> Unit) -> Unit) {
     val repo = ButacaApp.repo
     val scope = rememberCoroutineScope()
-    val all by repo.allCategories().collectAsState(initial = emptyList())
+    val all by remember() { repo.allCategories() }.collectAsState(initial = emptyList())
     val list = if (onlyAdult) all.filter { it.isAdult } else all
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         SettingRow(
