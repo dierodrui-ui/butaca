@@ -319,7 +319,7 @@ fun TvTextField(
         value = value,
         onValueChange = onValue,
         singleLine = true,
-        textStyle = TextStyle(color = C.Text, fontSize = 16.sp),
+        textStyle = TextStyle(color = C.Text, fontSize = 16.sp, fontFamily = app.butaca.tv.ui.Jakarta),
         cursorBrush = SolidColor(C.Accent),
         visualTransformation = if (password) PasswordVisualTransformation() else VisualTransformation.None,
         keyboardOptions = KeyboardOptions(imeAction = imeAction, showKeyboardOnFocus = false),

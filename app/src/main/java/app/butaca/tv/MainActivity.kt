@@ -188,6 +188,9 @@ fun AppRoot() {
             menu?.let { m ->
                 QuickMenu(m, onOpen = { appNav.openRef(it) }, onDismiss = { menu = null })
             }
+            // Intro de cine al abrir la app (solo al arrancar)
+            var intro by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(repo.prefs.value.intro) }
+            if (intro) app.butaca.tv.ui.screens.IntroScreen(onDone = { intro = false })
         }
     }
 }

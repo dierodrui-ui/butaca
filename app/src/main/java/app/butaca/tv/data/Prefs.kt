@@ -20,6 +20,7 @@ data class Settings(
     val preferSpain: Boolean = true,
     val rememberTrack: Boolean = true,
     val compat: Boolean = true,
+    val intro: Boolean = true,      // intro con sonido al abrir la app
     val subs: Int = 0,             // 0 solo forzados, 1 siempre castellano, 2 desactivados
     // Control parental
     val adultHide: Boolean = true,
@@ -60,6 +61,7 @@ class Prefs(context: Context) {
         preferSpain = sp.getBoolean("preferSpain", true),
         rememberTrack = sp.getBoolean("rememberTrack", true),
         compat = sp.getBoolean("compat", true),
+        intro = sp.getBoolean("intro", true),
         subs = sp.getInt("subs", 0),
         adultHide = sp.getBoolean("adultHide", true),
         pin = sp.getString("pin", "") ?: "",
@@ -95,6 +97,7 @@ class Prefs(context: Context) {
             .putBoolean("adultHide", s.adultHide)
             .putString("pin", s.pin)
             .putBoolean("relock", s.relock)
+            .putBoolean("intro", s.intro)
             .putBoolean("newCatsHidden", s.newCatsHidden)
             .putString("tmdbKey", s.tmdbKey)
             .putInt("kidsLimit", s.kidsLimit)

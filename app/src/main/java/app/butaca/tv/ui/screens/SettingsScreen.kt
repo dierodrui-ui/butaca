@@ -134,6 +134,10 @@ fun SettingsScreen(onLogout: () -> Unit) {
                         SettingRow("Leer audio AC3, E-AC3 y DTS", "Evita que se salte la pista en castellano por su formato.",
                             onClick = { set { it.copy(compat = !it.compat) } }, switch = s.compat)
                     }
+                    item {
+                        SettingRow("Intro al abrir Butaca", "La presentación con el logo y el sonido. Se salta con cualquier botón.",
+                            onClick = { set { it.copy(intro = !it.intro) } }, switch = s.intro)
+                    }
                     item { Header("SUBTÍTULOS") }
                     item {
                         val o = listOf("Solo forzados en castellano", "Siempre en castellano", "Desactivados")

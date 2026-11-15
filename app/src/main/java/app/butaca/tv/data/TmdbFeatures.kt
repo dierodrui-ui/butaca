@@ -78,6 +78,9 @@ suspend fun Repo.homeRows(force: Boolean = false): List<RelatedRow> {
 
     add("Tendencias esta semana", matchTitles(tmdb.trending(3), null))
 
+    // Actualidad: lo que se lee hoy en Wikipedia convertido en filas con lo que tienes
+    try { trendRows().forEach { (t, l) -> add(t, l) } } catch (_: Exception) { }
+
     // Para estas fechas: fiestas, eventos y estaciones (calendario propio + palabras clave de TMDB)
     for (ev in activeEvents(Calendar.getInstance()).take(2)) {
         try {

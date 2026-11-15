@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Logo de Butaca: una butaca de cine con un «play» en el respaldo -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android" xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="100dp" android:height="100dp" android:viewportWidth="100" android:viewportHeight="100">
+    <path android:pathData="M24,0h52a24,24 0 0 1 24,24v52a24,24 0 0 1 -24,24h-52a24,24 0 0 1 -24,-24v-52a24,24 0 0 1 24,-24z">
+        <aapt:attr name="android:fillColor">
+            <gradient android:type="linear" android:startX="0" android:startY="0" android:endX="100" android:endY="100">
+                <item android:offset="0" android:color="#FFFF5466" />
+                <item android:offset="0.55" android:color="#FFE0283F" />
+                <item android:offset="1" android:color="#FF9C0F27" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <group>
+        <path android:fillColor="#FFFFFFFF" android:pathData="M39,17h22a11,11 0 0 1 11,11v30h-44v-30a11,11 0 0 1 11,-11z" />
+        <path android:fillColor="#FFFFFFFF" android:pathData="M29,60h42a5,5 0 0 1 5,5v2a5,5 0 0 1 -5,5h-42a5,5 0 0 1 -5,-5v-2a5,5 0 0 1 5,-5z" />
+        <path android:fillColor="#FFFFFFFF" android:pathData="M21,46h0a5,5 0 0 1 5,5v24a5,5 0 0 1 -5,5h0a5,5 0 0 1 -5,-5v-24a5,5 0 0 1 5,-5z" />
+        <path android:fillColor="#FFFFFFFF" android:pathData="M79,46h0a5,5 0 0 1 5,5v24a5,5 0 0 1 -5,5h0a5,5 0 0 1 -5,-5v-24a5,5 0 0 1 5,-5z" />
+        <path android:fillColor="#FFD3233D" android:pathData="M44.5,28.5v18l14.5,-9z" />
+    </group>
+</vector>

@@ -105,10 +105,7 @@ private fun Rail(current: Tab, onSelect: (Tab) -> Unit) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Box(Modifier.size(34.dp).clip(RoundedCornerShape(9.dp)).background(C.Accent), contentAlignment = Alignment.Center) {
-                Icon(Ic.Play, null, tint = C.OnAccent, modifier = Modifier.size(16.dp))
-            }
-            T("Butaca", size = 22, weight = FontWeight.Bold)
+            app.butaca.tv.ui.components.BrandLogo(34.dp, 22)
         }
         if (settings.kidsLimit > 0) {
             Box(

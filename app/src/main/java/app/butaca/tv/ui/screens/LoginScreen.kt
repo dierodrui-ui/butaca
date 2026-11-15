@@ -69,10 +69,7 @@ fun LoginScreen(onLoggedIn: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Box(Modifier.size(36.dp).clip(RoundedCornerShape(10.dp)).background(C.Accent), contentAlignment = Alignment.Center) {
-                    Icon(Ic.Play, null, tint = C.OnAccent, modifier = Modifier.size(17.dp))
-                }
-                T("Butaca", size = 23, weight = FontWeight.Bold)
+                app.butaca.tv.ui.components.BrandLogo(36.dp, 23)
             }
             T("Conecta tu cuenta", size = 28, weight = FontWeight.SemiBold)
             T("Usa los mismos datos que en XCIPTV: la URL del servidor, tu usuario y tu contraseña.", size = 15, color = C.Muted)

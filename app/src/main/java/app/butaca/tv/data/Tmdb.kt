@@ -101,6 +101,25 @@ class TmdbClient(
         }
     }
 
+    /** Otras fuentes públicas (Wikipedia), con la misma caché en disco. */
+    suspend fun getUrl(url: String, ttlHours: Long = 3): JSONObject? = withContext(Dispatchers.IO) {
+        val file = File(cacheRoot, sha1(url))
+        if (file.exists() && System.currentTimeMillis() - file.lastModified() < ttlHours * 3600_000L) {
+            try { return@withContext JSONObject(file.readText()) } catch (_: Exception) { }
+        }
+        try {
+            val req = Request.Builder().url(url)
+                .header("User-Agent", "Butaca/2.0 (app Android TV; https://github.com/dierodrui-ui/butaca)")
+                .header("Accept", "application/json").build()
+            http.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return@withContext null
+                val body = resp.body?.string() ?: return@withContext null
+                try { file.writeText(body) } catch (_: Exception) { }
+                JSONObject(body)
+            }
+        } catch (_: Exception) { null }
+    }
+
     private suspend fun get(path: String, params: Map<String, String> = emptyMap(), ttlHours: Long = 168, auth: Map<String, String> = emptyMap()): JSONObject? =
         withContext(Dispatchers.IO) {
             val key = keyProvider().trim()

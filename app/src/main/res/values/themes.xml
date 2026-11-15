@@ -1,8 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="bg">#FF0D1015</color>
-    <color name="accent">#FFFFB020</color>
-    <color name="ic_launcher_background">#FF0D1015</color>
+    <color name="bg">#FF07080C</color>
+    <color name="accent">#FFE0283F</color>
 
     <style name="Theme.Butaca" parent="android:Theme.Material.NoActionBar">
         <item name="android:windowBackground">@color/bg</item>

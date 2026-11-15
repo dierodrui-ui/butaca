@@ -111,6 +111,7 @@ fun T(
         modifier = modifier,
         fontSize = size.sp,
         fontWeight = weight,
+        fontFamily = app.butaca.tv.ui.Jakarta,
         color = color,
         maxLines = maxLines,
         overflow = TextOverflow.Ellipsis,
@@ -281,7 +282,7 @@ fun PosterCard(
                     if (later) Box(
                         Modifier.size(24.dp).clip(CircleShape).background(Color(0xE60D1015)),
                         contentAlignment = Alignment.Center,
-                    ) { Icon(Ic.Clock, "Ver más adelante", tint = C.Accent, modifier = Modifier.size(14.dp)) }
+                    ) { Icon(Ic.Clock, "Ver más adelante", tint = C.Gold, modifier = Modifier.size(14.dp)) }
                 }
             }
         }
@@ -505,4 +506,19 @@ fun TvRow(modifier: Modifier = Modifier, gap: Dp = 18.dp, content: LazyListScope
 @Composable
 fun TopFade(modifier: Modifier = Modifier, height: Dp = 48.dp) {
     Box(modifier.fillMaxWidth().height(height).background(Brush.verticalGradient(0f to C.Bg, 1f to Color(0x000D1015))))
+}
+
+/** Logo de Butaca: la butaca sobre el cuadrado rojo y el nombre. */
+@Composable
+fun BrandLogo(markSize: Dp, textSize: Int) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        androidx.compose.foundation.Image(
+            androidx.compose.ui.res.painterResource(app.butaca.tv.R.drawable.logo_mark), contentDescription = "Butaca",
+            modifier = Modifier.size(markSize),
+        )
+        Text(
+            "Butaca", fontFamily = app.butaca.tv.ui.Jakarta, fontWeight = FontWeight.ExtraBold,
+            fontSize = textSize.sp, letterSpacing = (-0.4).sp, color = C.Text,
+        )
+    }
 }

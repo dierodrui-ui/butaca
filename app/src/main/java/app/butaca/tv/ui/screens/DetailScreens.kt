@@ -182,7 +182,7 @@ private fun TagChips(related: Related?) {
     FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         tags.forEach { t ->
             val (bg, fg, label) = when (t.kind) {
-                TagKind.GENRE -> Triple(Color(0x33FFB020), C.Accent, t.name)
+                TagKind.GENRE -> Triple(Color(0x33E8344B), C.AccentSoft, t.name)
                 TagKind.COMPANY, TagKind.NETWORK -> Triple(Color(0x337FA8FF), Color(0xFF9DBBFF), t.name)
                 TagKind.KEYWORD -> Triple(Color(0x22FFFFFF), C.TextSoft, "#" + t.name)
             }

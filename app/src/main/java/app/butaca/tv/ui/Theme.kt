@@ -12,23 +12,26 @@ import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.darkColorScheme
 
 object C {
-    val Bg = Color(0xFF0D1015)
-    val Rail = Color(0xFF11151B)
-    val Panel = Color(0xFF141820)
-    val Surface = Color(0xFF171B22)
-    val Surface2 = Color(0xFF1C212A)
-    val Surface3 = Color(0xFF1E232C)
-    val Raised = Color(0xFF232A35)
-    val Border = Color(0xFF2A303B)
-    val BorderSoft = Color(0xFF262C37)
-    val Text = Color(0xFFF2F4F7)
-    val TextSoft = Color(0xFFC9CFD8)
-    val Muted = Color(0xFFA0A8B6)
-    val Faint = Color(0xFF8A93A3)
-    val Accent = Color(0xFFFFB020)
-    val OnAccent = Color(0xFF1A1200)
+    // Paleta «sala de cine»: negros profundos con un rojo butaca como acento
+    val Bg = Color(0xFF07080C)
+    val Rail = Color(0xFF0B0D12)
+    val Panel = Color(0xFF0E1016)
+    val Surface = Color(0xFF13151C)
+    val Surface2 = Color(0xFF171A22)
+    val Surface3 = Color(0xFF1A1D26)
+    val Raised = Color(0xFF232736)
+    val Border = Color(0xFF2B2F3D)
+    val BorderSoft = Color(0xFF232733)
+    val Text = Color(0xFFF4F5F8)
+    val TextSoft = Color(0xFFCBCFD8)
+    val Muted = Color(0xFF9CA3B3)
+    val Faint = Color(0xFF7F8798)
+    val Accent = Color(0xFFE8344B)
+    val AccentSoft = Color(0xFFFF7A8C)
+    val OnAccent = Color(0xFFFFFFFF)
+    val Gold = Color(0xFFFFC24A)
     val Green = Color(0xFF3DD68C)
-    val Red = Color(0xFFFF6B5A)
+    val Red = Color(0xFFFF5A6E)
 
     val FolderColors = listOf(0xFFF5C451, 0xFF7FA8FF, 0xFF5ED3A0, 0xFFE58BB5, 0xFFB79CFF, 0xFF6FD3E8, 0xFFFF8A5B)
 
@@ -40,9 +43,31 @@ object C {
     fun toneFor(key: String): Color = Color(posterTones[(key.hashCode() and 0x7fffffff) % posterTones.size])
 }
 
+/** Tipografía de la app: Plus Jakarta Sans (moderna y muy legible en la tele). */
+val Jakarta = androidx.compose.ui.text.font.FontFamily(
+    androidx.compose.ui.text.font.Font(app.butaca.tv.R.font.jakarta_regular, androidx.compose.ui.text.font.FontWeight.Normal),
+    androidx.compose.ui.text.font.Font(app.butaca.tv.R.font.jakarta_medium, androidx.compose.ui.text.font.FontWeight.Medium),
+    androidx.compose.ui.text.font.Font(app.butaca.tv.R.font.jakarta_semibold, androidx.compose.ui.text.font.FontWeight.SemiBold),
+    androidx.compose.ui.text.font.Font(app.butaca.tv.R.font.jakarta_bold, androidx.compose.ui.text.font.FontWeight.Bold),
+    androidx.compose.ui.text.font.Font(app.butaca.tv.R.font.jakarta_extrabold, androidx.compose.ui.text.font.FontWeight.ExtraBold),
+)
+
+private fun butacaTypography(): androidx.tv.material3.Typography {
+    val b = androidx.tv.material3.Typography()
+    fun androidx.compose.ui.text.TextStyle.j() = copy(fontFamily = Jakarta)
+    return androidx.tv.material3.Typography(
+        displayLarge = b.displayLarge.j(), displayMedium = b.displayMedium.j(), displaySmall = b.displaySmall.j(),
+        headlineLarge = b.headlineLarge.j(), headlineMedium = b.headlineMedium.j(), headlineSmall = b.headlineSmall.j(),
+        titleLarge = b.titleLarge.j(), titleMedium = b.titleMedium.j(), titleSmall = b.titleSmall.j(),
+        bodyLarge = b.bodyLarge.j(), bodyMedium = b.bodyMedium.j(), bodySmall = b.bodySmall.j(),
+        labelLarge = b.labelLarge.j(), labelMedium = b.labelMedium.j(), labelSmall = b.labelSmall.j(),
+    )
+}
+
 @Composable
 fun ButacaTheme(content: @Composable () -> Unit) {
     MaterialTheme(
+        typography = butacaTypography(),
         colorScheme = darkColorScheme(
             primary = C.Accent,
             onPrimary = C.OnAccent,
