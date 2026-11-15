@@ -55,6 +55,7 @@ import app.butaca.tv.data.HubRow
 import app.butaca.tv.data.ItemEntity
 import app.butaca.tv.data.KidsPrep
 import app.butaca.tv.data.movieHub
+import app.butaca.tv.data.catalogHub
 import app.butaca.tv.data.toRef
 import app.butaca.tv.ui.C
 import app.butaca.tv.ui.components.EmptyState
