@@ -94,7 +94,7 @@ suspend fun Repo.homeRows(force: Boolean = false): List<RelatedRow> {
     }
 
     add("Imprescindibles", matchTitles(tmdb.topRated(false, 4), null))
-    val year = cal.get(Calendar.YEAR)
+    val year = Calendar.getInstance().get(Calendar.YEAR)
     add("Cine español reciente", matchTitles(tmdb.discover(false, emptyList(), 4, mapOf(
         "with_original_language" to "es", "primary_release_date.gte" to "${year - 3}-01-01",
     )), null))
