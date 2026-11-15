@@ -51,7 +51,17 @@ class AppNav(
 
 val LocalNav = staticCompositionLocalOf<AppNav> { error("Sin navegación") }
 
+/** Para que el reproductor reciba el mando aunque el foco se haya perdido. */
+object KeyRouter {
+    @Volatile var handler: ((android.view.KeyEvent) -> Boolean)? = null
+}
+
 class MainActivity : ComponentActivity() {
+
+    override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
+        if (KeyRouter.handler?.invoke(event) == true) return true
+        return super.dispatchKeyEvent(event)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

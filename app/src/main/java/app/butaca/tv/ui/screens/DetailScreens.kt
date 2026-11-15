@@ -167,8 +167,8 @@ private fun SecondaryActions(item: ItemEntity, onPicker: () -> Unit) {
 /** Filas de relacionados (TMDB) y, al final, títulos del mismo estilo. */
 private fun LazyListScope.relatedRows(related: List<RelatedRow>, similar: List<ItemEntity>) {
     related.forEachIndexed { i, row -> posterRow("rel_$i", row.title, row.items) }
-    val shown = related.flatMap { r -> r.items.map { it.stableKey } }.toSet()
-    posterRow("similar", "Del mismo estilo", similar.filter { it.stableKey !in shown })
+    // Sin TMDB, al menos los del mismo género según tu servidor
+    if (!ButacaApp.repo.tmdb.enabled) posterRow("similar", "Del mismo estilo", similar)
 }
 
 private fun LazyListScope.posterRow(key: String, title: String, similar: List<ItemEntity>) {

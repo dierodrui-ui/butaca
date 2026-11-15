@@ -48,6 +48,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
 import app.butaca.tv.ButacaApp
+import app.butaca.tv.KeyRouter
 import app.butaca.tv.data.AudioPrefEntity
 import app.butaca.tv.data.ContentType
 import app.butaca.tv.data.PlayItem
@@ -201,6 +202,13 @@ fun PlayerScreen(req: PlayRequest, onExit: () -> Unit) {
     }
 
     // Atrás: primero oculta los controles; para salir hay que pulsarlo dos veces
+    // El mando llega siempre al reproductor (salvo si hay un aviso de error en pantalla)
+    DisposableEffect(playerView) {
+        val v = playerView
+        KeyRouter.handler = { e -> if (error == null && v != null) v.handleKey(e) else false }
+        onDispose { KeyRouter.handler = null }
+    }
+
     BackHandler {
         val now = System.currentTimeMillis()
         when {
@@ -244,7 +252,11 @@ fun PlayerScreen(req: PlayRequest, onExit: () -> Unit) {
                     setShowSubtitleButton(true)
                     setShowNextButton(req.items.size > 1)
                     setShowPreviousButton(req.items.size > 1)
-                    setControllerVisibilityListener(PlayerView.ControllerVisibilityListener { v -> controlsVisible = v == View.VISIBLE })
+                    setControllerVisibilityListener(PlayerView.ControllerVisibilityListener { v ->
+                        controlsVisible = v == View.VISIBLE
+                        // Al ocultarse, el foco vuelve al reproductor para no perder el mando
+                        if (v != View.VISIBLE) post { requestFocus() }
+                    })
                     post { requestFocus() }
                 }
             },

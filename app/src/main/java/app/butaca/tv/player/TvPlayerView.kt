@@ -8,10 +8,11 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.PlayerView
 
 /**
- * PlayerView pensado para el mando:
- * - cualquier botón de dirección u OK muestra los controles (y reinicia los 5 s para ocultarlos);
- * - con los controles ocultos, ◀ ▶ avanzan/retroceden con pasos que se aceleran al mantener;
- *   el salto real se hace al soltar, así no se recarga el vídeo en cada pulsación.
+ * Reproductor pensado para el mando. Las pulsaciones le llegan siempre desde la Activity
+ * (aunque el foco se haya perdido al ocultarse los controles):
+ * - OK o cualquier flecha muestran los controles; cada pulsación reinicia los 5 s para ocultarlos;
+ * - con los controles ocultos (o sobre la barra de tiempo), ◀ ▶ avanzan/retroceden con pasos
+ *   que se aceleran al mantener; el salto real se hace al soltar.
  */
 @OptIn(UnstableApi::class)
 class TvPlayerView(context: Context) : PlayerView(context) {
@@ -31,41 +32,57 @@ class TvPlayerView(context: Context) : PlayerView(context) {
 
     private fun isNavKey(code: Int) = code == KeyEvent.KEYCODE_DPAD_UP || code == KeyEvent.KEYCODE_DPAD_DOWN ||
         code == KeyEvent.KEYCODE_DPAD_CENTER || code == KeyEvent.KEYCODE_ENTER ||
-        code == KeyEvent.KEYCODE_NUMPAD_ENTER || code == KeyEvent.KEYCODE_MENU
+        code == KeyEvent.KEYCODE_NUMPAD_ENTER || code == KeyEvent.KEYCODE_MENU ||
+        code == KeyEvent.KEYCODE_DPAD_LEFT || code == KeyEvent.KEYCODE_DPAD_RIGHT
 
-    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+    private fun isMediaKey(code: Int) = code == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE || code == KeyEvent.KEYCODE_MEDIA_PLAY ||
+        code == KeyEvent.KEYCODE_MEDIA_PAUSE || code == KeyEvent.KEYCODE_MEDIA_FAST_FORWARD ||
+        code == KeyEvent.KEYCODE_MEDIA_REWIND || code == KeyEvent.KEYCODE_MEDIA_NEXT || code == KeyEvent.KEYCODE_MEDIA_PREVIOUS
+
+    fun focusControls() {
+        post { (playPause?.takeIf { it.isShown } ?: this).requestFocus() }
+    }
+
+    /** Devuelve true si la pulsación ya está atendida. */
+    fun handleKey(event: KeyEvent): Boolean {
         val code = event.keyCode
+        val down = event.action == KeyEvent.ACTION_DOWN
+        val visible = isControllerFullyVisible
 
-        // Avance/retroceso con los controles ocultos (o sobre la barra de tiempo)
-        if ((code == KeyEvent.KEYCODE_DPAD_LEFT || code == KeyEvent.KEYCODE_DPAD_RIGHT) && canScrub()) {
-            val onTimeBar = timeBar?.hasFocus() == true
-            if (!isControllerFullyVisible || onTimeBar) {
-                if (event.action == KeyEvent.ACTION_DOWN) {
-                    val r = event.repeatCount
-                    val step = when {
-                        r < 4 -> 10_000L
-                        r < 14 -> 30_000L
-                        r < 30 -> 60_000L
-                        else -> 180_000L
-                    }
-                    if (isControllerFullyVisible) hideController()
-                    onScrub?.invoke(if (code == KeyEvent.KEYCODE_DPAD_LEFT) -step else step)
+        if (isMediaKey(code)) return dispatchMediaKeyEvent(event)
+
+        val isLR = code == KeyEvent.KEYCODE_DPAD_LEFT || code == KeyEvent.KEYCODE_DPAD_RIGHT
+        if (isLR && canScrub() && (!visible || timeBar?.hasFocus() == true)) {
+            if (down) {
+                val r = event.repeatCount
+                val step = when {
+                    r < 4 -> 10_000L
+                    r < 14 -> 30_000L
+                    r < 30 -> 60_000L
+                    else -> 180_000L
                 }
-                return true
-            }
-        }
-
-        // Con los controles ocultos: cualquier botón de navegación los muestra
-        if (!isControllerFullyVisible && (isNavKey(code) || code == KeyEvent.KEYCODE_DPAD_LEFT || code == KeyEvent.KEYCODE_DPAD_RIGHT)) {
-            if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
-                showController()
-                post { playPause?.requestFocus() }
+                if (visible) hideController()
+                onScrub?.invoke(if (code == KeyEvent.KEYCODE_DPAD_LEFT) -step else step)
             }
             return true
         }
 
-        // Con los controles visibles: cada pulsación reinicia la cuenta de 5 segundos
-        if (isControllerFullyVisible && event.action == KeyEvent.ACTION_DOWN) showController()
-        return super.dispatchKeyEvent(event)
+        if (!isNavKey(code)) return false
+
+        if (!visible) {
+            if (down && event.repeatCount == 0) {
+                showController()
+                focusControls()
+            }
+            return true
+        }
+
+        // Controles visibles: reinicia la cuenta atrás y asegura que el foco está en ellos
+        if (down) showController()
+        if (!hasFocus()) {
+            if (down) focusControls()
+            return true
+        }
+        return false
     }
 }

@@ -17,6 +17,8 @@ data class TmdbTitle(
     val title: String,
     val originalTitle: String?,
     val year: Int?,
+    val genreIds: List<Int> = emptyList(),
+    val popularity: Double = 0.0,
 )
 
 /**
@@ -70,7 +72,9 @@ class TmdbClient(
         val title = (if (isTv) o.optString("name") else o.optString("title")).ifBlank { return null }
         val orig = if (isTv) o.optString("original_name") else o.optString("original_title")
         val date = if (isTv) o.optString("first_air_date") else o.optString("release_date")
-        return TmdbTitle(o.optInt("id"), isTv, title, orig.ifBlank { null }, yearOf(date))
+        val g = o.optJSONArray("genre_ids")
+        val genres = if (g == null) emptyList() else (0 until g.length()).map { g.optInt(it) }
+        return TmdbTitle(o.optInt("id"), isTv, title, orig.ifBlank { null }, yearOf(date), genres, o.optDouble("popularity", 0.0))
     }
 
     private fun parseList(arr: JSONArray?, forceTv: Boolean? = null): List<TmdbTitle> {
@@ -124,6 +128,29 @@ class TmdbClient(
             }
         }
         return out.toList()
+    }
+
+    /** Géneros del título: ids y nombres en castellano. */
+    fun genres(d: JSONObject): List<Pair<Int, String>> {
+        val arr = d.optJSONArray("genres") ?: return emptyList()
+        return (0 until arr.length()).mapNotNull { arr.optJSONObject(it) }.map { it.optInt("id") to it.optString("name") }
+    }
+
+    /** Los más vistos con esos géneros (varias páginas, para que haya más coincidencias con tu servidor). */
+    suspend fun discover(isTv: Boolean, genreIds: List<Int>, pages: Int = 5): List<TmdbTitle> {
+        if (genreIds.isEmpty()) return emptyList()
+        val path = if (isTv) "/discover/tv" else "/discover/movie"
+        val out = ArrayList<TmdbTitle>()
+        for (p in 1..pages) {
+            val res = get(path, mapOf(
+                "language" to "es-ES",
+                "with_genres" to genreIds.joinToString(","),
+                "sort_by" to "vote_count.desc",
+                "page" to p.toString(),
+            ))?.optJSONArray("results") ?: break
+            out += parseList(res, isTv)
+        }
+        return out
     }
 
     fun recommendations(d: JSONObject, isTv: Boolean): List<TmdbTitle> =

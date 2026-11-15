@@ -517,27 +517,43 @@ class Repo(
             val fromKey = item.stableKey.substringAfter(":").takeIf { it.startsWith("t") }?.drop(1)?.toIntOrNull()
             val id = serverTmdbId?.toIntOrNull() ?: fromKey ?: tmdb.findId(isTv, item.name, item.year) ?: return emptyList()
             val d = tmdb.details(isTv, id) ?: return emptyList()
+            // Todo sale de TMDB; tu servidor solo se usa para saber qué tienes disponible.
+            val genres = tmdb.genres(d)
+            val genreIds = genres.map { it.first }
+
+            val saga = d.optJSONObject("belongs_to_collection")?.let { c ->
+                val name = c.optString("name").removeSuffix(" - Colección").removeSuffix(" (Colección)").removePrefix("Colección ")
+                "Saga: $name" to matchTitles(tmdb.collection(c.optInt("id")), item.stableKey)
+            }
+            val director = tmdb.directors(d, isTv).firstOrNull()?.let { p ->
+                ((if (isTv) "De los creadores: " else "Más de ") + p.name) to matchTitles(tmdb.personWork(p.id, asDirector = true), item.stableKey)
+            }
+            val cast = tmdb.mainCast(d, isTv, 2).map { p ->
+                ("Con " + p.name) to matchTitles(tmdb.personWork(p.id, asDirector = false).take(80), item.stableKey)
+            }
+
+            // Mismo estilo: recomendaciones y parecidos de TMDB que comparten género,
+            // más los títulos más vistos de esos mismos géneros. Ordenados por cuántos géneros comparten.
+            val pool = (tmdb.recommendations(d, isTv) + tmdb.discover(isTv, genreIds.take(2)))
+                .filter { t -> genreIds.isEmpty() || t.genreIds.any { it in genreIds } }
+                .distinctBy { it.id to it.isTv }
+                .sortedByDescending { t -> t.genreIds.count { it in genreIds } * 1000 + t.popularity }
+            val styleItems = matchTitles(pool, item.stableKey)
+
+            // Lo que sale en saga, director o reparto no se repite en «mismo estilo»
+            val claimed = HashSet<String>()
             val rows = ArrayList<RelatedRow>()
-            val used = HashSet<String>()
-            fun add(title: String, list: List<ItemEntity>, min: Int = 1) {
-                val fresh = list.filter { it.stableKey !in used }.take(15)
-                if (fresh.size >= min) { rows += RelatedRow(title, fresh); fresh.forEach { used += it.stableKey } }
+            val later = ArrayList<RelatedRow>()
+            listOfNotNull(saga, director).plus(cast).forEach { (title, list) ->
+                val fresh = list.filter { it.stableKey !in claimed }.take(15)
+                if (fresh.isNotEmpty()) { later += RelatedRow(title, fresh); fresh.forEach { claimed += it.stableKey } }
             }
-            // Saga
-            d.optJSONObject("belongs_to_collection")?.let { c ->
-                val parts = tmdb.collection(c.optInt("id"))
-                add("Saga: " + c.optString("name").removeSuffix(" - Colección").removeSuffix(" (Colección)"), matchTitles(parts, item.stableKey))
+            val style = styleItems.filter { it.stableKey !in claimed }.take(18)
+            if (style.isNotEmpty()) {
+                val label = genres.take(3).joinToString(", ") { it.second }
+                rows += RelatedRow(if (label.isBlank()) "Del mismo estilo" else "Del mismo estilo · $label", style)
             }
-            // Director (o creadores en series)
-            tmdb.directors(d, isTv).firstOrNull()?.let { p ->
-                add((if (isTv) "Más de los creadores: " else "Más de ") + p.name, matchTitles(tmdb.personWork(p.id, asDirector = true), item.stableKey))
-            }
-            // Reparto principal
-            tmdb.mainCast(d, isTv, 2).forEach { p ->
-                add("Con " + p.name, matchTitles(tmdb.personWork(p.id, asDirector = false).take(60), item.stableKey))
-            }
-            // Recomendaciones
-            add("Te puede gustar", matchTitles(tmdb.recommendations(d, isTv), item.stableKey))
+            rows += later
             rows
         } catch (_: Exception) {
             emptyList()
