@@ -19,6 +19,7 @@ data class TmdbTitle(
     val year: Int?,
     val genreIds: List<Int> = emptyList(),
     val popularity: Double = 0.0,
+    val language: String? = null,
 )
 
 /**
@@ -102,7 +103,10 @@ class TmdbClient(
         val date = if (isTv) o.optString("first_air_date") else o.optString("release_date")
         val g = o.optJSONArray("genre_ids")
         val genres = if (g == null) emptyList() else (0 until g.length()).map { g.optInt(it) }
-        return TmdbTitle(o.optInt("id"), isTv, title, orig.ifBlank { null }, yearOf(date), genres, o.optDouble("popularity", 0.0))
+        return TmdbTitle(
+            o.optInt("id"), isTv, title, orig.ifBlank { null }, yearOf(date), genres, o.optDouble("popularity", 0.0),
+            o.optString("original_language").ifBlank { null },
+        )
     }
 
     private fun parseList(arr: JSONArray?, forceTv: Boolean? = null): List<TmdbTitle> {
@@ -123,8 +127,22 @@ class TmdbClient(
     }
 
     suspend fun details(isTv: Boolean, id: Int): JSONObject? =
-        if (isTv) get("/tv/$id", mapOf("language" to "es-ES", "append_to_response" to "aggregate_credits,recommendations,similar"))
-        else get("/movie/$id", mapOf("language" to "es-ES", "append_to_response" to "credits,recommendations,similar"))
+        if (isTv) get("/tv/$id", mapOf("language" to "es-ES", "append_to_response" to "aggregate_credits,recommendations,similar,keywords"))
+        else get("/movie/$id", mapOf("language" to "es-ES", "append_to_response" to "credits,recommendations,similar,keywords"))
+
+    /** Etiquetas (palabras clave) del título. TMDB las da en inglés. */
+    fun keywords(d: JSONObject, isTv: Boolean): List<Pair<Int, String>> {
+        val kw = d.optJSONObject("keywords") ?: return emptyList()
+        val arr = (if (isTv) kw.optJSONArray("results") else kw.optJSONArray("keywords")) ?: return emptyList()
+        return (0 until arr.length()).mapNotNull { arr.optJSONObject(it) }.map { it.optInt("id") to it.optString("name") }
+    }
+
+    /** Géneros en castellano de un título del servidor (para mostrarlos bajo la carátula). */
+    suspend fun genresFor(isTv: Boolean, name: String, year: Int?, knownId: Int?): Pair<List<String>, JSONObject>? {
+        val id = knownId ?: findId(isTv, name, year) ?: return null
+        val d = details(isTv, id) ?: return null
+        return genres(d).map { it.second } to d
+    }
 
     suspend fun collection(id: Int): List<TmdbTitle> =
         parseList(get("/collection/$id", mapOf("language" to "es-ES"))?.optJSONArray("parts"), forceTv = false)
@@ -165,17 +183,19 @@ class TmdbClient(
     }
 
     /** Los más vistos con esos géneros (varias páginas, para que haya más coincidencias con tu servidor). */
-    suspend fun discover(isTv: Boolean, genreIds: List<Int>, pages: Int = 5): List<TmdbTitle> {
-        if (genreIds.isEmpty()) return emptyList()
+    suspend fun discover(isTv: Boolean, genreIds: List<Int>, pages: Int = 5, extra: Map<String, String> = emptyMap()): List<TmdbTitle> {
+        if (genreIds.isEmpty() && extra.isEmpty()) return emptyList()
         val path = if (isTv) "/discover/tv" else "/discover/movie"
         val out = ArrayList<TmdbTitle>()
         for (p in 1..pages) {
-            val res = get(path, mapOf(
+            val params = mutableMapOf(
                 "language" to "es-ES",
-                "with_genres" to genreIds.joinToString(","),
                 "sort_by" to "vote_count.desc",
                 "page" to p.toString(),
-            ))?.optJSONArray("results") ?: break
+            )
+            if (genreIds.isNotEmpty()) params["with_genres"] = genreIds.joinToString(",")
+            params.putAll(extra)
+            val res = get(path, params)?.optJSONArray("results") ?: break
             out += parseList(res, isTv)
         }
         return out

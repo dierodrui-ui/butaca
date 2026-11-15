@@ -67,10 +67,11 @@ data class ItemEntity(
     val quality: Int,
     val position: Int,
     val syncStamp: Long,
-    @ColumnInfo(defaultValue = "0") val enriched: Boolean = false,
+    /** 0 = sin completar, 1 = datos del servidor, 2 = datos de TMDB */
+    @ColumnInfo(defaultValue = "0") val enriched: Int = 0,
 )
 
-data class Enrichment(val key: String, val genre: String?, val plot: String?, val backdrop: String?)
+data class Enrichment(val key: String, val genre: String?, val plot: String?, val backdrop: String?, val enriched: Int)
 
 @Entity(tableName = "folder")
 data class FolderEntity(
@@ -221,11 +222,15 @@ interface ItemDao {
     @RawQuery
     suspend fun raw(q: SupportSQLiteQuery): List<ItemEntity>
 
-    @Query("SELECT `key`, genre, plot, backdrop FROM item WHERE type = :type AND enriched = 1")
+    @Query("SELECT `key`, genre, plot, backdrop, enriched FROM item WHERE type = :type AND enriched >= 1")
     suspend fun enrichments(type: String): List<Enrichment>
 
-    @Query("UPDATE item SET genre = COALESCE(:genre, genre), plot = COALESCE(:plot, plot), backdrop = COALESCE(backdrop, :backdrop), enriched = 1 WHERE type = 'movie' AND streamId = :streamId")
+    @Query("UPDATE item SET genre = CASE WHEN enriched >= 2 THEN genre ELSE COALESCE(:genre, genre) END, plot = COALESCE(:plot, plot), backdrop = COALESCE(backdrop, :backdrop), enriched = MAX(enriched, 1) WHERE type = 'movie' AND streamId = :streamId")
     suspend fun enrich(streamId: String, genre: String?, plot: String?, backdrop: String?)
+
+    /** Géneros de TMDB (mandan sobre los del servidor). */
+    @Query("UPDATE item SET genre = COALESCE(:genre, genre), plot = COALESCE(plot, :plot), backdrop = COALESCE(backdrop, :backdrop), enriched = 2 WHERE stableKey = :stableKey")
+    suspend fun enrichTmdb(stableKey: String, genre: String?, plot: String?, backdrop: String?)
 
     @Query(
         "SELECT * FROM item WHERE type = :type AND isAdult = 0 AND stableKey != :exclude AND (' ' || normName || ' ') LIKE '% ' || :prefix || '%' " +

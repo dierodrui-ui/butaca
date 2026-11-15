@@ -17,7 +17,7 @@ android {
         minSdk = 26
         targetSdk = 34
         versionCode = runNumber
-        versionName = "1.0.$runNumber"
+        versionName = "2.0.$runNumber"
         // La clave de TMDB llega desde un secreto de GitHub; nunca se escribe en el código
         buildConfigField("String", "TMDB_KEY", "\"${System.getenv("TMDB_KEY") ?: ""}\"")
         ndk {

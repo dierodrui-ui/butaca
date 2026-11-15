@@ -34,7 +34,7 @@ jobs:
       - name: Publicar versión
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0.${{ github.run_number }}
-          name: Butaca 1.0.${{ github.run_number }}
+          tag_name: v2.0.${{ github.run_number }}
+          name: Butaca 2.0.${{ github.run_number }}
           files: butaca.apk
           make_latest: true

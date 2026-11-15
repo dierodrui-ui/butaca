@@ -50,6 +50,7 @@ import app.butaca.tv.data.ContentType
 import app.butaca.tv.data.Episode
 import app.butaca.tv.data.ItemEntity
 import app.butaca.tv.data.RelatedRow
+import app.butaca.tv.data.Related
 import androidx.compose.runtime.snapshotFlow
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
@@ -164,6 +165,27 @@ private fun SecondaryActions(item: ItemEntity, onPicker: () -> Unit) {
     )
 }
 
+/** Géneros y etiquetas de TMDB, para ver de un vistazo de qué va. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun TagChips(related: Related?) {
+    val genres = related?.genres.orEmpty()
+    val tags = related?.tags.orEmpty()
+    if (genres.isEmpty() && tags.isEmpty()) return
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        genres.forEach { g ->
+            Box(Modifier.clip(RoundedCornerShape(999.dp)).background(Color(0x33FFB020)).padding(horizontal = 10.dp, vertical = 4.dp)) {
+                T(g, size = 12, weight = FontWeight.SemiBold, color = C.Accent)
+            }
+        }
+        tags.forEach { t ->
+            Box(Modifier.clip(RoundedCornerShape(999.dp)).background(Color(0x22FFFFFF)).padding(horizontal = 10.dp, vertical = 4.dp)) {
+                T("#$t", size = 12, color = C.TextSoft)
+            }
+        }
+    }
+}
+
 /** Filas de relacionados (TMDB). Si TMDB no responde, al menos los del mismo género según tu servidor. */
 private fun LazyListScope.relatedRows(related: List<RelatedRow>?, similar: List<ItemEntity>) {
     if (related == null) {
@@ -221,7 +243,7 @@ fun MovieScreen(key: String, onBack: () -> Unit) {
     val progress by remember(current.stableKey) { repo.progressOf(current.stableKey) }.collectAsState(initial = null)
     val genre = info?.genre ?: current.genre
     val similar by produceState(emptyList<ItemEntity>(), current.key, genre) { value = repo.similar(current, genre) }
-    val related by produceState<List<RelatedRow>?>(null, current.key) {
+    val related by produceState<Related?>(null, current.key) {
         val tid = withTimeoutOrNull(4000) { snapshotFlow { info }.filterNotNull().first() }?.tmdbId
         value = repo.related(current, tid)
     }
@@ -260,7 +282,8 @@ fun MovieScreen(key: String, onBack: () -> Unit) {
                             Artwork(info?.poster ?: current.icon, current.name, current.stableKey, Modifier.fillMaxSize(), titleSize = 20)
                         }
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(11.dp)) {
-                            T(listOfNotNull("Película", genre).joinToString(" · "), size = 13, color = C.TextSoft, maxLines = 1)
+                            val genreText = related?.genres?.takeIf { it.isNotEmpty() }?.joinToString(", ") ?: genre
+                            T(listOfNotNull("Película", genreText).joinToString(" · "), size = 13, color = C.TextSoft, maxLines = 1)
                             T(current.name, size = 32, weight = FontWeight.Bold, maxLines = 2, lineHeight = 36)
                             val meta = listOfNotNull(
                                 current.year?.toString() ?: info?.releaseDate?.take(4),
@@ -268,6 +291,7 @@ fun MovieScreen(key: String, onBack: () -> Unit) {
                                 ratingText(info?.rating ?: current.rating),
                             ).joinToString(" · ")
                             if (meta.isNotBlank()) T(meta, size = 14, color = C.Muted)
+                            TagChips(related)
                             val plot = info?.plot ?: current.plot
                             if (!plot.isNullOrBlank()) T(plot, size = 14, color = C.TextSoft, maxLines = 4, lineHeight = 20, modifier = Modifier.fillMaxWidth(0.9f))
                             info?.director?.let { T("Dirección: $it", size = 12, color = C.Muted, maxLines = 1) }
@@ -293,7 +317,7 @@ fun MovieScreen(key: String, onBack: () -> Unit) {
                         }
                     }
                 }
-                relatedRows(related, similar)
+                relatedRows(related?.rows, similar)
             }
         }
     }
@@ -331,7 +355,7 @@ fun SeriesScreen(key: String, onBack: () -> Unit) {
     val epProgress = epProgressList.associateBy { it.episodeId }
     val genre = info?.genre ?: current.genre
     val similar by produceState(emptyList<ItemEntity>(), current.key, genre) { value = repo.similar(current, genre) }
-    val related by produceState<List<RelatedRow>?>(null, current.key) {
+    val related by produceState<Related?>(null, current.key) {
         val tid = withTimeoutOrNull(5000) { snapshotFlow { info }.filterNotNull().first() }?.tmdbId
         value = repo.related(current, tid)
     }
@@ -362,7 +386,8 @@ fun SeriesScreen(key: String, onBack: () -> Unit) {
         // La cabecera queda fija arriba; solo se desplaza la lista de episodios
         Column(Modifier.fillMaxSize().padding(start = 48.dp, end = 48.dp, top = 26.dp)) {
             Column(verticalArrangement = Arrangement.spacedBy(9.dp), modifier = Modifier.fillMaxWidth(0.72f)) {
-                T(listOfNotNull("Serie", genre).joinToString(" · "), size = 13, color = C.TextSoft, maxLines = 1)
+                val genreText = related?.genres?.takeIf { it.isNotEmpty() }?.joinToString(", ") ?: genre
+                T(listOfNotNull("Serie", genreText).joinToString(" · "), size = 13, color = C.TextSoft, maxLines = 1)
                 T(current.name, size = if (inList) 24 else 32, weight = FontWeight.Bold, maxLines = if (inList) 1 else 2, lineHeight = if (inList) 28 else 36)
                 val seasons = info?.seasons?.size ?: 0
                 val meta = listOfNotNull(
@@ -371,6 +396,7 @@ fun SeriesScreen(key: String, onBack: () -> Unit) {
                     ratingText(info?.rating ?: current.rating),
                 ).joinToString(" · ")
                 if (meta.isNotBlank()) T(meta, size = 14, color = C.Muted)
+                if (!inList) TagChips(related)
                 if (!inList) {
                     val plot = info?.plot ?: current.plot
                     if (!plot.isNullOrBlank()) T(plot, size = 14, color = C.TextSoft, maxLines = 3, lineHeight = 20)
@@ -415,7 +441,7 @@ fun SeriesScreen(key: String, onBack: () -> Unit) {
                         EpisodeRow(ep, p?.finished == true, p?.takeIf { !it.finished && it.durationMs > 0 }?.let { it.positionMs.toFloat() / it.durationMs },
                             onClick = { play(ep, p?.takeIf { !it.finished }?.positionMs ?: 0L) })
                     }
-                    relatedRows(related, similar)
+                    relatedRows(related?.rows, similar)
                 }
             }
         }

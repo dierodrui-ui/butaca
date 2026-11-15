@@ -60,6 +60,9 @@ data class PlayRequest(
 /** Una fila de títulos relacionados en la ficha (saga, director, reparto…). */
 data class RelatedRow(val title: String, val items: List<ItemEntity>)
 
+/** Lo que TMDB aporta a una ficha: filas relacionadas, géneros y etiquetas. */
+data class Related(val rows: List<RelatedRow>, val genres: List<String> = emptyList(), val tags: List<String> = emptyList())
+
 class Repo(
     val db: ButacaDb,
     val client: XtreamClient,
@@ -209,7 +212,8 @@ class Repo(
                 val it = mapItem(type, m, catByKey, newCatsHidden, stamp, position++) ?: return@mapNotNull null
                 val e = enriched[it.key]
                 if (e == null) it else it.copy(
-                    genre = it.genre ?: e.genre, plot = it.plot ?: e.plot, backdrop = it.backdrop ?: e.backdrop, enriched = true,
+                    genre = if (e.enriched >= 2) e.genre ?: it.genre else it.genre ?: e.genre,
+                    plot = it.plot ?: e.plot, backdrop = it.backdrop ?: e.backdrop, enriched = e.enriched,
                 )
             }
             db.items().upsert(items)
@@ -429,28 +433,42 @@ class Repo(
         return ordered
     }
 
-    // ----- Completar datos de películas (género bajo la carátula) -----
-    private val enrichQueue = kotlinx.coroutines.channels.Channel<String>(capacity = 400)
+    // ----- Completar géneros (bajo la carátula) -----
+    // Con TMDB: géneros de TMDB para películas y series. Sin TMDB: los del servidor (solo películas).
+    private val enrichQueue = kotlinx.coroutines.channels.Channel<ItemEntity>(capacity = 400)
     private val enrichRequested = java.util.Collections.synchronizedSet(HashSet<String>())
 
     init {
         repeat(3) {
             scope.launch {
-                for (streamId in enrichQueue) {
-                    val a = account() ?: continue
+                for (item in enrichQueue) {
                     try {
-                        val info = client.vodInfo(a, streamId)
-                        db.items().enrich(streamId, info?.genre, info?.plot, info?.backdrop)
+                        if (tmdb.enabled) {
+                            val isTv = item.type == ContentType.SERIES
+                            val known = item.stableKey.substringAfter(":").takeIf { it.startsWith("t") }?.drop(1)?.toIntOrNull()
+                            val res = tmdb.genresFor(isTv, item.name, item.year, known)
+                            if (res != null) {
+                                val (genres, d) = res
+                                val bd = d.optString("backdrop_path").takeIf { it.isNotBlank() }?.let { "https://image.tmdb.org/t/p/w1280$it" }
+                                db.items().enrichTmdb(item.stableKey, genres.joinToString(", ").ifBlank { null }, d.optString("overview").ifBlank { null }, bd)
+                            }
+                        } else if (item.type == ContentType.MOVIE) {
+                            val a = account() ?: continue
+                            val info = client.vodInfo(a, item.streamId)
+                            db.items().enrich(item.streamId, info?.genre, info?.plot, info?.backdrop)
+                        }
                     } catch (_: Exception) { }
                 }
             }
         }
     }
 
-    /** Pide al servidor el género de una película que se está mostrando, una sola vez. */
+    /** Pide el género de un título que se está mostrando, una sola vez. */
     fun requestGenre(item: ItemEntity) {
-        if (item.type != ContentType.MOVIE || item.enriched || item.genre != null) return
-        if (enrichRequested.add(item.streamId)) enrichQueue.trySend(item.streamId)
+        if (item.type == ContentType.LIVE) return
+        val needed = if (tmdb.enabled) item.enriched < 2 else (item.type == ContentType.MOVIE && item.enriched == 0 && item.genre == null)
+        if (!needed) return
+        if (enrichRequested.add(item.stableKey)) enrichQueue.trySend(item)
     }
 
     suspend fun saveVodInfo(item: ItemEntity, info: VodInfo) {
@@ -510,13 +528,13 @@ class Repo(
         return out.values.toList()
     }
 
-    suspend fun related(item: ItemEntity, serverTmdbId: String?): List<RelatedRow> {
-        if (!tmdb.enabled || item.type == ContentType.LIVE) return emptyList()
+    suspend fun related(item: ItemEntity, serverTmdbId: String?): Related {
+        if (!tmdb.enabled || item.type == ContentType.LIVE) return Related(emptyList())
         val isTv = item.type == ContentType.SERIES
         return try {
             val fromKey = item.stableKey.substringAfter(":").takeIf { it.startsWith("t") }?.drop(1)?.toIntOrNull()
-            val id = serverTmdbId?.toIntOrNull() ?: fromKey ?: tmdb.findId(isTv, item.name, item.year) ?: return emptyList()
-            val d = tmdb.details(isTv, id) ?: return emptyList()
+            val id = serverTmdbId?.toIntOrNull() ?: fromKey ?: tmdb.findId(isTv, item.name, item.year) ?: return Related(emptyList())
+            val d = tmdb.details(isTv, id) ?: return Related(emptyList())
             // Todo sale de TMDB; tu servidor solo se usa para saber qué tienes disponible.
             val genres = tmdb.genres(d)
             val genreIds = genres.map { it.first }
@@ -532,12 +550,35 @@ class Repo(
                 ("Con " + p.name) to matchTitles(tmdb.personWork(p.id, asDirector = false).take(80), item.stableKey)
             }
 
-            // Mismo estilo: recomendaciones y parecidos de TMDB que comparten género,
-            // más los títulos más vistos de esos mismos géneros. Ordenados por cuántos géneros comparten.
-            val pool = (tmdb.recommendations(d, isTv) + tmdb.discover(isTv, genreIds.take(2)))
-                .filter { t -> genreIds.isEmpty() || t.genreIds.any { it in genreIds } }
+            // Guardamos los géneros de TMDB en el título para verlos bajo la carátula
+            val bd = d.optString("backdrop_path").takeIf { it.isNotBlank() }?.let { "https://image.tmdb.org/t/p/w1280$it" }
+            db.items().enrichTmdb(item.stableKey, genres.joinToString(", ") { it.second }.ifBlank { null }, d.optString("overview").ifBlank { null }, bd)
+
+            // ---- Mismo estilo, coherente ----
+            // Géneros «fuertes»: si el título no los tiene, no sugerimos nada que los tenga
+            // (así una comedia no trae películas de animación infantiles).
+            val strong = setOf(16, 10751, 99, 27, 10402, 37, 10752, 878, 14, 10762, 10763, 10764, 10766, 10767, 10765, 10768)
+            val lang = d.optString("original_language").ifBlank { null }
+            val keywords = tmdb.keywords(d, isTv)
+            val kwIds = keywords.map { it.first }.take(5)
+            val byKeyword = if (kwIds.isEmpty()) emptyList() else tmdb.discover(isTv, emptyList(), 2, mapOf("with_keywords" to kwIds.joinToString("|")))
+            val kwSet = byKeyword.map { it.id }.toSet()
+            val sameLang = if (lang != null && lang != "en" && genreIds.isNotEmpty())
+                tmdb.discover(isTv, genreIds.take(1), 3, mapOf("with_original_language" to lang)) else emptyList()
+            val pool = (tmdb.recommendations(d, isTv) + byKeyword + sameLang + tmdb.discover(isTv, genreIds.take(2), 4))
                 .distinctBy { it.id to it.isTv }
-                .sortedByDescending { t -> t.genreIds.count { it in genreIds } * 1000 + t.popularity }
+                .filter { t ->
+                    (genreIds.isEmpty() || t.genreIds.any { it in genreIds }) &&
+                        t.genreIds.none { it in strong && it !in genreIds }
+                }
+                .sortedByDescending { t ->
+                    val shared = t.genreIds.count { it in genreIds }
+                    val extra = t.genreIds.count { it !in genreIds }
+                    shared * 10.0 - extra * 3.0 +
+                        (if (lang != null && t.language == lang) 12.0 else 0.0) +
+                        (if (t.id in kwSet) 8.0 else 0.0) +
+                        t.popularity / 1000.0
+                }
             val styleItems = matchTitles(pool, item.stableKey)
 
             // Estudio o cadena: probamos con los principales hasta encontrar alguno con títulos en tu servidor
@@ -561,10 +602,10 @@ class Repo(
             val label = genres.take(3).joinToString(", ") { it.second }
             add(if (label.isBlank()) "Del mismo estilo" else "Del mismo estilo · $label", styleItems, 18)
             cast.forEach { add(it.first, it.second) }
-            rows
+            Related(rows, genres.map { it.second }, keywords.map { it.second }.take(10))
         } catch (e: Exception) {
             tmdb.lastError = e.message ?: e.javaClass.simpleName
-            emptyList()
+            Related(emptyList())
         }
     }
 
