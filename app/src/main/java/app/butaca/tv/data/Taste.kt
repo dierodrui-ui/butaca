@@ -8,7 +8,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlin.math.exp
-import kotlin.math.tanh
 
 /**
  * «% para ti»: lo que la app ha aprendido de este perfil.
@@ -41,7 +40,7 @@ class TasteModel(
         if (genres.isEmpty() && tmdbId == null) return null
         // Géneros: los que más te gustan pesan más que los neutros
         val affs = genres.map { genreAff[it] ?: 0f }
-        val g = if (affs.isEmpty()) 0f else (affs.sum() / affs.size) * 0.6f + (affs.maxOrNull() ?: 0f) * 0.4f
+        val g = if (affs.isEmpty()) 0f else (affs.sum() / affs.size) * 0.8f + (affs.maxOrNull() ?: 0f) * 0.2f
         var taste = (g + 1f) / 2f                                    // 0..1
         // Recomendado a partir de lo que te gustó (o de lo que no)
         val rel = tmdbId?.let { related[it] } ?: 0f
@@ -87,48 +86,62 @@ object Taste {
 private fun daysAgo(t: Long) = (System.currentTimeMillis() - t) / 86_400_000.0
 
 suspend fun Repo.buildTaste(): TasteModel {
-    val sum = HashMap<String, Float>()
+    // Cada pista se convierte en una «nota equivalente» (1-10) con un peso.
+    // Por género se acumulan todas y se comparan con TU media: un solo 9 en romántica
+    // no convierte el romance en tu género favorito si casi todo lo que ves y valoras es ciencia ficción.
+    class Ev(val genres: List<String>, val value: Float, val weight: Float)
+    val evs = ArrayList<Ev>()
     var signals = 0
-    fun add(genre: String?, w: Float) {
-        genre?.split(',')?.map { TextUtil.norm(it.trim()) }?.filter { it.isNotBlank() }?.forEach { g -> sum[g] = (sum[g] ?: 0f) + w }
-    }
+    fun genresOf(g: String?) = g?.split(',')?.map { TextUtil.norm(it.trim()) }?.filter { it.isNotBlank() }.orEmpty()
+    fun add(genre: String?, value: Float, weight: Float) { val gs = genresOf(genre); if (gs.isNotEmpty()) evs += Ev(gs, value, weight) }
+
     val ratings = user.taste().all()
     val rated = ratings.associateBy { it.stableKey }
     val keys = HashSet<String>()
 
-    // 1) Tus notas (lo que más pesa). Las recientes cuentan algo más.
-    ratings.forEach { r ->
-        val w = ((r.score - 5.5f) / 4.5f) * (0.75f + 0.25f * exp(-daysAgo(r.at) / 120.0).toFloat())
-        add(r.genre, w * 1.4f); signals++
-    }
-    // 2) Favoritos (si no tienen nota)
+    // 1) Tus notas: lo que más pesa (las de hace muchos meses, un poco menos)
+    ratings.forEach { r -> add(r.genre, r.score.toFloat(), 0.8f + 0.2f * exp(-daysAgo(r.at) / 180.0).toFloat()); signals++ }
+    // 2) Favoritos sin nota: como un 8,5
     val favId = systemFolderId("fav")
     val favs = user.folders().items(favId).filter { it.stableKey !in rated }
     keys += favs.map { it.stableKey }
-    // 3) Lo que has terminado sin valorar
-    val finished = user.progress().observeWatched().first().filter { it.stableKey !in rated }
+    val favKeys = favs.map { it.stableKey }.toHashSet()
+    // 3) Terminado sin nota: como un 7, pero con poco peso (verlo no siempre es que te guste)
+    val finished = user.progress().observeWatched().first().filter { it.stableKey !in rated && it.stableKey !in favKeys }
     keys += finished.map { it.stableKey }
-    // 4) Lo último que has visto (aunque no lo terminaras), con más peso cuanto más reciente
-    val recent = user.stats().observeTop(40).first().filter { it.stableKey !in rated }
+    // 4) Visto un buen rato últimamente (sin nota ni terminado): solo indica interés
+    val finishedKeys = finished.map { it.stableKey }.toHashSet()
+    val recent = user.stats().observeTop(40).first().filter { it.stableKey !in rated && it.stableKey !in favKeys && it.stableKey !in finishedKeys }
     keys += recent.map { it.stableKey }
-    val laterId = systemFolderId("later")
-    val later = user.folders().items(laterId).filter { it.stableKey !in rated }
-    keys += later.map { it.stableKey }
 
     val info = db.items().byStableKeys(keys.toList()).associateBy { it.stableKey }
-    favs.forEach { f -> add(info[f.stableKey]?.genre, 0.8f); signals++ }
-    finished.forEach { p -> if (p.stableKey !in favs.map { it.stableKey }) { add(info[p.stableKey]?.genre, 0.35f); signals++ } }
-    recent.forEach { t ->
-        if (t.total >= 15 * 60_000L) { add(info[t.stableKey]?.genre, (0.25f * exp(-daysAgo(t.lastAt) / 14.0)).toFloat()); signals++ }
-    }
-    later.forEach { l -> add(info[l.stableKey]?.genre, 0.12f) }
-    // Pulgares del dado (sin haberla visto: cuentan menos que una nota)
+    favs.forEach { f -> add(info[f.stableKey]?.genre, 8.5f, 0.6f); signals++ }
+    finished.forEach { p -> add(info[p.stableKey]?.genre, 7f, 0.3f); signals++ }
+    recent.forEach { t -> if (t.total >= 15 * 60_000L) { add(info[t.stableKey]?.genre, 6.8f, 0.15f * exp(-daysAgo(t.lastAt) / 21.0).toFloat()); signals++ } }
+    // 5) Pulgares del dado (sin haberla visto)
     val ups = DiceVotes.up(this); val downs = DiceVotes.down(this)
     val voted = db.items().byStableKeys((ups + downs).toList().take(400)).associateBy { it.stableKey }
-    ups.forEach { k -> voted[k]?.let { add(it.genre, 0.3f); signals++ } }
-    downs.forEach { k -> voted[k]?.let { add(it.genre, -0.35f); signals++ } }
+    ups.forEach { k -> voted[k]?.let { add(it.genre, 8f, 0.25f); signals++ } }
+    downs.forEach { k -> voted[k]?.let { add(it.genre, 3f, 0.35f); signals++ } }
 
-    val genreAff = sum.mapValues { (_, v) -> tanh(v / 2.2f) }
+    // Tu media (si aún hay pocas pistas, se asume 6,5)
+    val totalW = evs.sumOf { it.weight.toDouble() }.toFloat()
+    val mean = if (totalW < 1f) 6.5f else (evs.sumOf { (it.value * it.weight).toDouble() }.toFloat() + 6.5f * 2f) / (totalW + 2f)
+    // Por género: media «prudente» (con 3 votos ficticios de tu media) y cuánto lo ves respecto a lo demás
+    val gSum = HashMap<String, Float>(); val gW = HashMap<String, Float>()
+    evs.forEach { e ->
+        val w = e.weight / e.genres.size.coerceAtLeast(1) * 1.5f   // un título con 4 géneros reparte su peso
+        e.genres.forEach { g -> gSum[g] = (gSum[g] ?: 0f) + e.value * w; gW[g] = (gW[g] ?: 0f) + w }
+    }
+    val prior = 3f
+    val maxW = gW.values.maxOrNull() ?: 1f
+    val genreAff = gW.keys.associateWith { g ->
+        val w = gW[g] ?: 0f
+        val shrunk = ((gSum[g] ?: 0f) + prior * mean) / (w + prior)
+        val quality = ((shrunk - mean) / 2.0f).coerceIn(-1f, 1f)          // ¿te gusta más o menos que tu media?
+        val interest = (w / maxW).coerceIn(0f, 1f)                          // ¿cuánto lo ves en comparación?
+        (quality * 0.7f + interest * 0.3f).coerceIn(-1f, 1f)
+    }
 
     // Recomendaciones de TMDB a partir de lo que te gustó (y de lo que no)
     val related = HashMap<Int, Float>()
