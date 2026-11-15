@@ -44,11 +44,12 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-enum class Tab(val label: String) { HOME("Inicio"), SEARCH("Buscar"), LIVE("Directo"), MOVIES("Películas"), SERIES("Series"), FOLDERS("Mis carpetas"), SETTINGS("Ajustes") }
+enum class Tab(val label: String) { HOME("Inicio"), SEARCH("Buscar"), WISH("Te digo lo que ver"), LIVE("Directo"), MOVIES("Películas"), SERIES("Series"), FOLDERS("Mis carpetas"), SETTINGS("Ajustes") }
 
 private fun Tab.icon(): ImageVector = when (this) {
     Tab.HOME -> Ic.Home
     Tab.SEARCH -> Ic.Search
+    Tab.WISH -> Ic.Mic
     Tab.LIVE -> Ic.Tv
     Tab.MOVIES -> Ic.Film
     Tab.SERIES -> Ic.Series
@@ -73,6 +74,7 @@ fun MainScreen(onLogout: () -> Unit) {
                 when (tab) {
                     Tab.HOME -> HomeScreen(onGoFolders = { tab = Tab.FOLDERS })
                     Tab.SEARCH -> SearchScreen()
+                    Tab.WISH -> WishScreen()
                     Tab.LIVE -> CatalogScreen(ContentType.LIVE)
                     Tab.MOVIES -> MoviesScreen()
                     Tab.SERIES -> CatalogScreen(ContentType.SERIES)
