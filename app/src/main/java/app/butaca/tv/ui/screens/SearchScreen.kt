@@ -32,6 +32,8 @@ import app.butaca.tv.LocalNav
 import app.butaca.tv.data.ContentType
 import app.butaca.tv.data.ItemEntity
 import app.butaca.tv.data.toRef
+import app.butaca.tv.data.SearchExtras
+import app.butaca.tv.data.searchExtras
 import app.butaca.tv.ui.C
 import app.butaca.tv.ui.components.EmptyState
 import app.butaca.tv.ui.components.MenuRequest
@@ -54,22 +56,39 @@ fun SearchScreen() {
     var results by remember { mutableStateOf<List<ItemEntity>>(emptyList()) }
     var searching by remember { mutableStateOf(false) }
     var filter by remember { mutableStateOf("all") }
+    var extras by remember { mutableStateOf<SearchExtras?>(null) }
+    var decade by remember { mutableStateOf(0) }
+    var minRating by remember { mutableStateOf(0) }
+    val decades = listOf("Todas", "2020s", "2010s", "2000s", "90s", "80s", "Antes")
+    val ratings = listOf(0, 6, 7, 8)
+    fun passes(i: ItemEntity): Boolean {
+        val y = i.year
+        val dOk = when (decade) {
+            0 -> true
+            6 -> y != null && y < 1980
+            else -> y != null && y / 10 * 10 == listOf(0, 2020, 2010, 2000, 1990, 1980)[decade]
+        }
+        val r = ratings[minRating]
+        return dOk && (r == 0 || (i.rating ?: 0.0) >= r)
+    }
     val watched by remember { repo.watchedKeys() }.collectAsState(initial = emptySet())
     val field = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
     LaunchedEffect(Unit) { delay(200); requestFocusSafely(field) }
 
     LaunchedEffect(query) {
-        if (query.trim().length < 2) { results = emptyList(); return@LaunchedEffect }
+        if (query.trim().length < 2) { results = emptyList(); extras = null; return@LaunchedEffect }
         searching = true
         delay(300)
         results = repo.search(query)
         searching = false
+        extras = try { repo.searchExtras(query) } catch (_: Exception) { null }
     }
 
-    val movies = results.filter { it.type == ContentType.MOVIE }
-    val series = results.filter { it.type == ContentType.SERIES }
-    val live = results.filter { it.type == ContentType.LIVE }
+    val filtered = results.filter { it.type == ContentType.LIVE || passes(it) }
+    val movies = filtered.filter { it.type == ContentType.MOVIE }
+    val series = filtered.filter { it.type == ContentType.SERIES }
+    val live = filtered.filter { it.type == ContentType.LIVE }
 
     PivotScope(pivot = 60.dp) {
         LazyVerticalGrid(
@@ -89,7 +108,7 @@ fun SearchScreen() {
                         imeAction = ImeAction.Search,
                         onSubmit = { focusManager.moveFocus(FocusDirection.Down) },
                     )
-                    T("Busca en canales, películas y series a la vez, en español y en inglés. Pulsa ✓ o Atrás para cerrar el teclado.", size = 13, color = C.Muted)
+                    T("Títulos en español o inglés, personas («Tom Hanks», «Almodóvar») o temas («zombis», «navidad»). Pulsa ✓ o Atrás para cerrar el teclado.", size = 13, color = C.Muted)
                 }
             }
             if (query.trim().length >= 2) {
@@ -99,9 +118,46 @@ fun SearchScreen() {
                         Pill("Películas · ${movies.size}", filter == ContentType.MOVIE, { filter = ContentType.MOVIE })
                         Pill("Series · ${series.size}", filter == ContentType.SERIES, { filter = ContentType.SERIES })
                         Pill("Canales · ${live.size}", filter == ContentType.LIVE, { filter = ContentType.LIVE })
+                        Pill("Década: ${decades[decade]}", decade != 0, { decade = (decade + 1) % decades.size })
+                        Pill("Nota: ${if (ratings[minRating] == 0) "Todas" else "${ratings[minRating]}+"}", minRating != 0, { minRating = (minRating + 1) % ratings.size })
                     }
                 }
-                if (results.isEmpty() && !searching) {
+                // Personas y temas (desde TMDB)
+                extras?.let { ex ->
+                    val person = ex.person
+                    val pItems = ex.personItems.filter { passes(it) }
+                    if (person != null && pItems.isNotEmpty() && (filter == "all" || filter == ContentType.MOVIE || filter == ContentType.SERIES)) {
+                        item(key = "person_h", span = { GridItemSpan(maxLineSpan) }) {
+                            Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                SectionTitle(person.name, Modifier.padding(top = 8.dp), extra = "${pItems.size} títulos en tu servidor")
+                                Pill("Ver su página", false, { nav.openPerson(person.id) }, small = true)
+                            }
+                        }
+                        items(pItems.take(14), key = { "p_" + it.key }) { item ->
+                            LaunchedEffect(item.key) { repo.requestGenre(item) }
+                            PosterCard(
+                                title = item.name, icon = item.icon, keySeed = item.stableKey, width = null, meta = itemMeta(item),
+                                isSeries = item.type == ContentType.SERIES, watched = item.stableKey in watched,
+                                onClick = { nav.openItem(item) }, onLongClick = { nav.showMenu(MenuRequest(item.toRef())) },
+                            )
+                        }
+                    }
+                    ex.topics.forEachIndexed { ti, (label, list0) ->
+                        val list = list0.filter { passes(it) }
+                        if (list.isNotEmpty() && filter == "all") {
+                            item(key = "topic_h$ti", span = { GridItemSpan(maxLineSpan) }) { SectionTitle(label, Modifier.padding(top = 8.dp)) }
+                            items(list.take(14), key = { "t${ti}_" + it.key }) { item ->
+                                LaunchedEffect(item.key) { repo.requestGenre(item) }
+                                PosterCard(
+                                    title = item.name, icon = item.icon, keySeed = item.stableKey, width = null, meta = itemMeta(item),
+                                    isSeries = item.type == ContentType.SERIES, watched = item.stableKey in watched,
+                                    onClick = { nav.openItem(item) }, onLongClick = { nav.showMenu(MenuRequest(item.toRef())) },
+                                )
+                            }
+                        }
+                    }
+                }
+                if (results.isEmpty() && !searching && (extras?.personItems.isNullOrEmpty())) {
                     item(key = "none", span = { GridItemSpan(maxLineSpan) }) {
                         EmptyState("Sin resultados para «$query»", "Prueba con menos letras o con otra palabra del título.")
                     }

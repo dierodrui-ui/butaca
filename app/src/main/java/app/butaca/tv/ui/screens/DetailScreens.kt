@@ -49,7 +49,13 @@ import app.butaca.tv.LocalNav
 import app.butaca.tv.data.ContentType
 import app.butaca.tv.data.Episode
 import app.butaca.tv.data.ItemEntity
-import app.butaca.tv.data.RelatedRow
+import app.butaca.tv.data.Related
+import app.butaca.tv.data.TmdbTitle
+import app.butaca.tv.data.TmdbPerson
+import app.butaca.tv.data.TmdbEpisode
+import app.butaca.tv.data.setAlert
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.widthInRow
 import app.butaca.tv.data.Related
 import androidx.compose.runtime.snapshotFlow
 import kotlinx.coroutines.flow.filterNotNull
@@ -192,12 +198,12 @@ private fun LazyListScope.relatedRows(related: List<RelatedRow>?, similar: List<
         item(key = "rel_loading") { T("Buscando títulos relacionados…", size = 13, color = C.Muted, modifier = Modifier.padding(top = 12.dp, start = 6.dp)) }
         return
     }
-    related.forEachIndexed { i, row -> posterRow("rel_$i", row.title, row.items) }
+    related.forEachIndexed { i, row -> posterRow("rel_$i", row.title, row.items, row.missing) }
     if (related.isEmpty()) posterRow("similar", "Del mismo estilo", similar)
 }
 
-private fun LazyListScope.posterRow(key: String, title: String, similar: List<ItemEntity>) {
-    if (similar.isEmpty()) return
+private fun LazyListScope.posterRow(key: String, title: String, similar: List<ItemEntity>, missing: List<TmdbTitle> = emptyList()) {
+    if (similar.isEmpty() && missing.isEmpty()) return
     item(key = key) {
         val nav = LocalNav.current
         val repo = ButacaApp.repo
@@ -213,10 +219,60 @@ private fun LazyListScope.posterRow(key: String, title: String, similar: List<It
                         onLongClick = { nav.showMenu(MenuRequest(s.toRef())) },
                     )
                 }
+                // De la saga, lo que no tienes: en gris; al pulsar, te avisamos cuando llegue
+                items(missing, key = { "miss_${it.id}" }) { t ->
+                    val scope = rememberCoroutineScope()
+                    PosterCard(
+                        title = t.title, icon = t.poster, keySeed = "m${t.id}", width = 112.dp,
+                        meta = listOfNotNull(t.year?.toString(), "No disponible").joinToString(" · "), unavailable = true,
+                        onClick = {
+                            scope.launch { repo.setAlert(t, true) }
+                            nav.toast("«${t.title}» no está en tu servidor. Te avisaremos si llega.")
+                        },
+                    )
+                }
             }
         }
     }
 }
+
+/** Reparto y dirección: al pulsar, la página de la persona. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun PeopleChips(people: List<TmdbPerson>) {
+    if (people.isEmpty()) return
+    val nav = LocalNav.current
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        T("DIRECCIÓN Y REPARTO", size = 11, weight = FontWeight.SemiBold, color = C.Muted)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            people.take(8).forEach { p ->
+                FocusSurface(
+                    onClick = { nav.openPerson(p.id) },
+                    modifier = Modifier.height(34.dp),
+                    radius = 999.dp, container = C.Surface3, focusedScale = 1.06f,
+                ) {
+                    Row(
+                        Modifier.align(Alignment.Center).padding(start = 4.dp, end = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Box(Modifier.size(26.dp).clip(CircleShape).background(C.Raised)) {
+                            if (p.photo != null) AsyncImage(p.photo, null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                        }
+                        T(p.name, size = 13, maxLines = 1)
+                        p.role?.let { T(it, size = 11, color = C.Muted, maxLines = 1) }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun endsAt(minutes: Int): String {
+    val c = java.util.Calendar.getInstance().apply { add(java.util.Calendar.MINUTE, minutes) }
+    return String.format("termina a las %02d:%02d", c.get(java.util.Calendar.HOUR_OF_DAY), c.get(java.util.Calendar.MINUTE))
+}
+
+private fun certText(c: Int?) = c?.let { if (it == 0) "TP" else "+$it" }
 
 // ============================ Película ============================
 
@@ -284,11 +340,17 @@ fun MovieScreen(key: String, onBack: () -> Unit) {
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(11.dp)) {
                             val genreText = related?.genres?.takeIf { it.isNotEmpty() }?.joinToString(", ") ?: genre
                             T(listOfNotNull("Película", genreText).joinToString(" · "), size = 13, color = C.TextSoft, maxLines = 1)
-                            T(current.name, size = 32, weight = FontWeight.Bold, maxLines = 2, lineHeight = 36)
+                            val logo = related?.logo
+                            if (logo != null) AsyncImage(
+                                logo, current.name, contentScale = ContentScale.Fit, alignment = Alignment.CenterStart,
+                                modifier = Modifier.heightIn(max = 90.dp).widthIn(max = 420.dp),
+                            ) else T(current.name, size = 32, weight = FontWeight.Bold, maxLines = 2, lineHeight = 36)
                             val meta = listOfNotNull(
                                 current.year?.toString() ?: info?.releaseDate?.take(4),
-                                durationText(info?.durationSecs ?: 0),
+                                (related?.runtime?.let { durationText(it * 60L) } ?: durationText(info?.durationSecs ?: 0)),
+                                (related?.runtime ?: ((info?.durationSecs ?: 0) / 60).toInt().takeIf { it > 0 })?.let { endsAt(it) },
                                 ratingText(info?.rating ?: current.rating),
+                                certText(related?.cert ?: current.cert),
                             ).joinToString(" · ")
                             if (meta.isNotBlank()) T(meta, size = 14, color = C.Muted)
                             TagChips(related)
@@ -311,9 +373,11 @@ fun MovieScreen(key: String, onBack: () -> Unit) {
                                         scope.launch { repo.playRequestFor(current, 0)?.let { nav.play(it) } }
                                     })
                                 }
+                                related?.trailer?.let { k -> ActionButton("Tráiler", Ic.Film, onClick = { nav.openTrailer(k) }) }
                                 SecondaryActions(current) { picker = true }
                             }
                             Box(Modifier.padding(top = 6.dp)) { FolderChips(current.stableKey) }
+                            PeopleChips(related?.people.orEmpty())
                         }
                     }
                 }
@@ -373,6 +437,10 @@ fun SeriesScreen(key: String, onBack: () -> Unit) {
     val nextEp: Episode? = episodes.getOrNull(nextIdx)
     val nextResume = nextEp?.let { epProgress[it.id] }?.takeIf { !it.finished }?.positionMs ?: 0L
     var season by remember(info) { mutableIntStateOf(nextEp?.season ?: info?.seasons?.firstOrNull() ?: 1) }
+    val tmdbEpisodes by produceState(emptyMap<Int, TmdbEpisode>(), related?.tmdbId, season) {
+        val id = related?.tmdbId ?: return@produceState
+        value = try { repo.tmdb.season(id, season).associateBy { it.number } } catch (_: Exception) { emptyMap() }
+    }
 
     LaunchedEffect(info != null) { delay(200); requestFocusSafely(playFocus) }
 
@@ -388,14 +456,33 @@ fun SeriesScreen(key: String, onBack: () -> Unit) {
             Column(verticalArrangement = Arrangement.spacedBy(9.dp), modifier = Modifier.fillMaxWidth(0.72f)) {
                 val genreText = related?.genres?.takeIf { it.isNotEmpty() }?.joinToString(", ") ?: genre
                 T(listOfNotNull("Serie", genreText).joinToString(" · "), size = 13, color = C.TextSoft, maxLines = 1)
-                T(current.name, size = if (inList) 24 else 32, weight = FontWeight.Bold, maxLines = if (inList) 1 else 2, lineHeight = if (inList) 28 else 36)
+                val logo = related?.logo
+                if (logo != null && !inList) AsyncImage(
+                    logo, current.name, contentScale = ContentScale.Fit, alignment = Alignment.CenterStart,
+                    modifier = Modifier.heightIn(max = 80.dp).widthIn(max = 400.dp),
+                ) else T(current.name, size = if (inList) 24 else 32, weight = FontWeight.Bold, maxLines = if (inList) 1 else 2, lineHeight = if (inList) 28 else 36)
                 val seasons = info?.seasons?.size ?: 0
                 val meta = listOfNotNull(
                     current.year?.toString() ?: info?.releaseDate?.take(4),
                     if (seasons > 0) (if (seasons == 1) "1 temporada" else "$seasons temporadas") else null,
                     ratingText(info?.rating ?: current.rating),
+                    certText(related?.cert ?: current.cert),
                 ).joinToString(" · ")
                 if (meta.isNotBlank()) T(meta, size = 14, color = C.Muted)
+                // Estado de la serie según TMDB
+                related?.tv?.let { tv ->
+                    val state = when (tv.status) {
+                        "Returning Series" -> "En emisión"
+                        "Ended" -> "Finalizada"
+                        "Canceled" -> "Cancelada"
+                        "In Production" -> "En producción"
+                        else -> null
+                    }
+                    val next = tv.nextAirDate?.let { d -> "próximo episodio el ${formatDate(d)}" + (if (tv.nextSeason != null) " (T${tv.nextSeason} E${tv.nextEpisode})" else "") }
+                    val missing = if (tv.seasons > seasons && seasons > 0) "tu servidor tiene $seasons de ${tv.seasons} temporadas" else null
+                    val line = listOfNotNull(state, next, missing).joinToString(" · ")
+                    if (line.isNotBlank()) T(line.replaceFirstChar { it.uppercase() }, size = 13, weight = FontWeight.SemiBold, color = if (missing != null) C.Accent else C.Green)
+                }
                 if (!inList) TagChips(related)
                 if (!inList) {
                     val plot = info?.plot ?: current.plot
@@ -415,9 +502,11 @@ fun SeriesScreen(key: String, onBack: () -> Unit) {
                     else -> "Continuar · T${nextEp.season} E${nextEp.number}"
                 }
                 ActionButton(label, Ic.Play, onClick = { nextEp?.let { play(it, nextResume) } }, primary = true, modifier = Modifier.focusRequester(playFocus))
+                related?.trailer?.let { k -> ActionButton("Tráiler", Ic.Film, onClick = { nav.openTrailer(k) }) }
                 SecondaryActions(current) { picker = true }
             }
             if (!inList) Box(Modifier.padding(top = 12.dp)) { FolderChips(current.stableKey) }
+            if (!inList) Box(Modifier.padding(top = 10.dp)) { PeopleChips(related?.people.orEmpty().take(6)) }
 
             PivotScope(pivot = 12.dp) {
                 LazyColumn(
@@ -436,7 +525,14 @@ fun SeriesScreen(key: String, onBack: () -> Unit) {
                             }
                         }
                     }
-                    items(episodes.filter { it.season == season }, key = { it.id }) { ep ->
+                    items(episodes.filter { it.season == season }, key = { it.id }) { ep0 ->
+                        // Si el servidor no trae sinopsis o imagen del episodio, la ponemos desde TMDB
+                        val t = tmdbEpisodes[ep0.number]
+                        val ep = ep0.copy(
+                            plot = ep0.plot ?: t?.overview,
+                            image = ep0.image ?: t?.still,
+                            title = if (t?.name != null && Regex("(?i)(episod|cap[ií]tulo|s\\d+e\\d+|^\\d+$)").containsMatchIn(ep0.title)) t.name else ep0.title,
+                        )
                         val p = epProgress[ep.id]
                         EpisodeRow(ep, p?.finished == true, p?.takeIf { !it.finished && it.durationMs > 0 }?.let { it.positionMs.toFloat() / it.durationMs },
                             onClick = { play(ep, p?.takeIf { !it.finished }?.positionMs ?: 0L) })

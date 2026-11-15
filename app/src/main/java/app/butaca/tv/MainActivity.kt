@@ -38,6 +38,7 @@ import app.butaca.tv.ui.screens.LoginScreen
 import app.butaca.tv.ui.screens.MainScreen
 import app.butaca.tv.ui.screens.MovieScreen
 import app.butaca.tv.ui.screens.SeriesScreen
+import app.butaca.tv.ui.screens.PersonScreen
 import kotlinx.coroutines.launch
 
 class AppNav(
@@ -47,6 +48,8 @@ class AppNav(
     val showMenu: (MenuRequest) -> Unit,
     val toast: (String) -> Unit,
     val openFolder: (Long) -> Unit,
+    val openPerson: (Int) -> Unit,
+    val openTrailer: (String) -> Unit,
 )
 
 val LocalNav = staticCompositionLocalOf<AppNav> { error("Sin navegación") }
@@ -118,6 +121,16 @@ fun AppRoot() {
                 repo.requestedFolder.value = id
                 nav.popBackStack("main", inclusive = false)
             },
+            openPerson = { id -> nav.navigate("person/$id") },
+            openTrailer = { key ->
+                // La app de YouTube de Google TV; si no está, el navegador
+                val yt = android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse("vnd.youtube:$key"))
+                try { context.startActivity(yt) } catch (_: Exception) {
+                    try {
+                        context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/watch?v=$key")))
+                    } catch (_: Exception) { toast("No se ha podido abrir YouTube en este dispositivo") }
+                }
+            },
         )
     }
 
@@ -150,6 +163,9 @@ fun AppRoot() {
                 }
                 composable("series/{key}", arguments = listOf(navArgument("key") { type = NavType.StringType })) { e ->
                     SeriesScreen(Uri.decode(e.arguments?.getString("key") ?: ""), onBack = { nav.popBackStack() })
+                }
+                composable("person/{id}", arguments = listOf(navArgument("id") { type = NavType.IntType })) { e ->
+                    PersonScreen(e.arguments?.getInt("id") ?: 0, onBack = { nav.popBackStack() })
                 }
                 composable("player") {
                     val req = repo.pendingPlay

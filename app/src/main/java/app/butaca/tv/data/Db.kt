@@ -69,9 +69,28 @@ data class ItemEntity(
     val syncStamp: Long,
     /** 0 = sin completar, 1 = datos del servidor, 2 = datos de TMDB */
     @ColumnInfo(defaultValue = "0") val enriched: Int = 0,
+    val tmdbId: Int? = null,
+    /** Edad recomendada (0, 7, 12, 16, 18) según TMDB; null si aún no se sabe. */
+    val cert: Int? = null,
 )
 
-data class Enrichment(val key: String, val genre: String?, val plot: String?, val backdrop: String?, val enriched: Int)
+data class Enrichment(
+    val key: String, val genre: String?, val plot: String?, val backdrop: String?, val enriched: Int,
+    val tmdbId: Int?, val cert: Int?,
+)
+
+/** Estreno que esperas: te avisamos cuando llegue a tu servidor. */
+@Entity(tableName = "alert")
+data class AlertEntity(
+    @PrimaryKey val key: String,     // m123 / t123
+    val tmdbId: Int,
+    val isTv: Boolean,
+    val title: String,
+    val poster: String?,
+    val year: Int?,
+    val createdAt: Long,
+    val available: Boolean,
+)
 
 @Entity(tableName = "folder")
 data class FolderEntity(
@@ -222,15 +241,40 @@ interface ItemDao {
     @RawQuery
     suspend fun raw(q: SupportSQLiteQuery): List<ItemEntity>
 
-    @Query("SELECT `key`, genre, plot, backdrop, enriched FROM item WHERE type = :type AND enriched >= 1")
+    @Query("SELECT `key`, genre, plot, backdrop, enriched, tmdbId, cert FROM item WHERE type = :type AND enriched >= 1")
     suspend fun enrichments(type: String): List<Enrichment>
 
     @Query("UPDATE item SET genre = CASE WHEN enriched >= 2 THEN genre ELSE COALESCE(:genre, genre) END, plot = COALESCE(:plot, plot), backdrop = COALESCE(backdrop, :backdrop), enriched = MAX(enriched, 1) WHERE type = 'movie' AND streamId = :streamId")
     suspend fun enrich(streamId: String, genre: String?, plot: String?, backdrop: String?)
 
     /** Géneros de TMDB (mandan sobre los del servidor). */
-    @Query("UPDATE item SET genre = COALESCE(:genre, genre), plot = COALESCE(plot, :plot), backdrop = COALESCE(backdrop, :backdrop), enriched = 2 WHERE stableKey = :stableKey")
-    suspend fun enrichTmdb(stableKey: String, genre: String?, plot: String?, backdrop: String?)
+    @Query(
+        "UPDATE item SET genre = COALESCE(:genre, genre), plot = COALESCE(plot, :plot), backdrop = COALESCE(backdrop, :backdrop), " +
+            "tmdbId = COALESCE(:tmdbId, tmdbId), cert = COALESCE(:cert, cert), enriched = 2 WHERE stableKey = :stableKey"
+    )
+    suspend fun enrichTmdb(stableKey: String, genre: String?, plot: String?, backdrop: String?, tmdbId: Int?, cert: Int?)
+
+    /** Marca como revisado aunque TMDB no lo conozca (para no preguntar en bucle). */
+    @Query("UPDATE item SET enriched = 2 WHERE stableKey = :stableKey AND enriched < 2")
+    suspend fun markTried(stableKey: String)
+
+    @Query("SELECT * FROM item WHERE type IN ('movie','series') AND enriched < 2 ORDER BY added DESC LIMIT :limit")
+    suspend fun pendingEnrich(limit: Int): List<ItemEntity>
+
+    @Query("SELECT COUNT(*) FROM item WHERE type IN ('movie','series') AND enriched < 2")
+    suspend fun pendingEnrichCount(): Int
+
+    @Query("SELECT DISTINCT categoryKey FROM item WHERE type = :type AND cert IS NOT NULL AND cert <= :limit")
+    fun observeKidsCategories(type: String, limit: Int): Flow<List<String>>
+
+    @Query("SELECT * FROM item WHERE tmdbId = :tmdbId AND type = :type")
+    suspend fun byTmdbId(tmdbId: Int, type: String): List<ItemEntity>
+
+    @Query("SELECT * FROM item WHERE tmdbId IN (:ids)")
+    suspend fun byTmdbIds(ids: List<Int>): List<ItemEntity>
+
+    @Query("SELECT * FROM item WHERE stableKey IN (:keys) AND genre IS NOT NULL")
+    suspend fun genresOf(keys: List<String>): List<ItemEntity>
 
     @Query(
         "SELECT * FROM item WHERE type = :type AND isAdult = 0 AND stableKey != :exclude AND (' ' || normName || ' ') LIKE '% ' || :prefix || '%' " +
@@ -361,14 +405,27 @@ interface MiscDao {
 
     @Query("SELECT * FROM audio_pref WHERE seriesKey = :key")
     suspend fun audio(key: String): AudioPrefEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertAlert(a: AlertEntity)
+
+    @Query("DELETE FROM alert WHERE `key` = :key")
+    suspend fun deleteAlert(key: String)
+
+    @Query("SELECT * FROM alert ORDER BY createdAt DESC")
+    fun observeAlerts(): Flow<List<AlertEntity>>
+
+    @Query("SELECT * FROM alert")
+    suspend fun alerts(): List<AlertEntity>
 }
 
 @Database(
     entities = [
         CategoryEntity::class, ItemEntity::class, FolderEntity::class, FolderItemEntity::class,
         ProgressEntity::class, EpisodeProgressEntity::class, TrackedSeriesEntity::class, AudioPrefEntity::class,
+        AlertEntity::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = false,
 )
 abstract class ButacaDb : RoomDatabase() {
@@ -381,9 +438,23 @@ abstract class ButacaDb : RoomDatabase() {
     companion object {
         fun create(context: Context): ButacaDb =
             Room.databaseBuilder(context, ButacaDb::class.java, "butaca.db")
-                .addMigrations(MIGRATION_1_2)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                 .fallbackToDestructiveMigrationOnDowngrade()
                 .build()
+
+        /** v3: id de TMDB, edad recomendada y avisos de estrenos. */
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE item ADD COLUMN tmdbId INTEGER")
+                db.execSQL("ALTER TABLE item ADD COLUMN cert INTEGER")
+                // Volver a completar con TMDB (ahora también guardamos la edad)
+                db.execSQL("UPDATE item SET enriched = 1 WHERE enriched = 2")
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `alert` (`key` TEXT NOT NULL, `tmdbId` INTEGER NOT NULL, `isTv` INTEGER NOT NULL, " +
+                        "`title` TEXT NOT NULL, `poster` TEXT, `year` INTEGER, `createdAt` INTEGER NOT NULL, `available` INTEGER NOT NULL, PRIMARY KEY(`key`))"
+                )
+            }
+        }
 
         /** v2: datos ampliados de películas y nombres sin adornos (⭐) en tus listas. */
         private val MIGRATION_1_2 = object : Migration(1, 2) {

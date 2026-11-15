@@ -27,6 +27,14 @@ data class Settings(
     val relock: Boolean = true,
     val newCatsHidden: Boolean = true,
     val tmdbKey: String = "",
+    // Perfil infantil: 0 desactivado, 7 o 12 (edad máxima)
+    val kidsLimit: Int = 0,
+    // Cuenta de TMDB para la copia en la nube
+    val tmdbSession: String = "",
+    val tmdbAccountId: Int = 0,
+    val tmdbUser: String = "",
+    val tmdbLists: String = "",      // "folderId:listId,folderId:listId"
+    val lastCloudSync: Long = 0L,
 ) {
     val loggedIn: Boolean get() = server.isNotBlank() && user.isNotBlank()
     val maxQuality: Int get() = when (quality) { 1 -> 3; 2 -> 2; else -> 4 }
@@ -58,6 +66,12 @@ class Prefs(context: Context) {
         relock = sp.getBoolean("relock", true),
         newCatsHidden = sp.getBoolean("newCatsHidden", true),
         tmdbKey = sp.getString("tmdbKey", "") ?: "",
+        kidsLimit = sp.getInt("kidsLimit", 0),
+        tmdbSession = sp.getString("tmdbSession", "") ?: "",
+        tmdbAccountId = sp.getInt("tmdbAccountId", 0),
+        tmdbUser = sp.getString("tmdbUser", "") ?: "",
+        tmdbLists = sp.getString("tmdbLists", "") ?: "",
+        lastCloudSync = sp.getLong("lastCloudSync", 0L),
     )
 
     @Synchronized
@@ -83,6 +97,12 @@ class Prefs(context: Context) {
             .putBoolean("relock", s.relock)
             .putBoolean("newCatsHidden", s.newCatsHidden)
             .putString("tmdbKey", s.tmdbKey)
+            .putInt("kidsLimit", s.kidsLimit)
+            .putString("tmdbSession", s.tmdbSession)
+            .putInt("tmdbAccountId", s.tmdbAccountId)
+            .putString("tmdbUser", s.tmdbUser)
+            .putString("tmdbLists", s.tmdbLists)
+            .putLong("lastCloudSync", s.lastCloudSync)
             .apply()
         _flow.value = s
     }

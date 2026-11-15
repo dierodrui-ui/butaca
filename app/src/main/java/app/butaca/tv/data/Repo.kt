@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
@@ -58,10 +59,26 @@ data class PlayRequest(
 )
 
 /** Una fila de títulos relacionados en la ficha (saga, director, reparto…). */
-data class RelatedRow(val title: String, val items: List<ItemEntity>)
+data class RelatedRow(
+    val title: String,
+    val items: List<ItemEntity>,
+    /** Títulos de la saga que no están en tu servidor (se ven en gris). */
+    val missing: List<TmdbTitle> = emptyList(),
+)
 
-/** Lo que TMDB aporta a una ficha: filas relacionadas, géneros y etiquetas. */
-data class Related(val rows: List<RelatedRow>, val genres: List<String> = emptyList(), val tags: List<String> = emptyList())
+/** Lo que TMDB aporta a una ficha. */
+data class Related(
+    val rows: List<RelatedRow>,
+    val genres: List<String> = emptyList(),
+    val tags: List<String> = emptyList(),
+    val people: List<TmdbPerson> = emptyList(),
+    val logo: String? = null,
+    val trailer: String? = null,
+    val runtime: Int? = null,
+    val cert: Int? = null,
+    val tv: TvStatus? = null,
+    val tmdbId: Int? = null,
+)
 
 class Repo(
     val db: ButacaDb,
@@ -69,7 +86,7 @@ class Repo(
     val prefs: Prefs,
     val tmdb: TmdbClient,
 ) {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    internal val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val syncMutex = Mutex()
 
     private val _sync = MutableStateFlow(SyncState())
@@ -152,6 +169,9 @@ class Repo(
             val empty = db.items().count() == 0
             if (empty || System.currentTimeMillis() - s.lastSync > dayMs) syncNow()
             else refreshTrackedSeries()
+            // Copia en la nube cada 6 horas si tienes cuenta de TMDB conectada
+            if (prefs.value.tmdbSession.isNotBlank() && System.currentTimeMillis() - prefs.value.lastCloudSync > 6 * 3600_000L) cloudSync()
+            if (prefs.value.kidsLimit > 0) startKidsPrep()
         }
     }
 
@@ -171,6 +191,8 @@ class Repo(
             prefs.update { it.copy(lastSync = System.currentTimeMillis()) }
             _sync.value = SyncState(true, "Buscando episodios nuevos…")
             refreshTrackedSeries()
+            try { checkAlerts() } catch (_: Exception) { }
+            if (prefs.value.kidsLimit > 0) startKidsPrep()
             _sync.value = SyncState(false, "")
         } catch (e: Exception) {
             _sync.value = SyncState(false, "", "No se pudo actualizar el catálogo: ${e.message ?: "error de red"}")
@@ -214,6 +236,7 @@ class Repo(
                 if (e == null) it else it.copy(
                     genre = if (e.enriched >= 2) e.genre ?: it.genre else it.genre ?: e.genre,
                     plot = it.plot ?: e.plot, backdrop = it.backdrop ?: e.backdrop, enriched = e.enriched,
+                    tmdbId = e.tmdbId, cert = e.cert,
                 )
             }
             db.items().upsert(items)
@@ -332,11 +355,31 @@ class Repo(
         } else db.misc().markSeen(stableKey, info.episodes.size, info.seasons.size)
     }
 
+    // ----- Perfil infantil -----
+    private val kidsLiveRx = Regex("(?i)(infantil|kids|niñ|nin[oa]s|junior|disney|cartoon|clan|boing|nick|baby|dibujos|animaci)")
+
+    /** ¿Se puede ver con el perfil infantil activo? Lo que no tiene edad conocida queda fuera. */
+    fun kidsOk(item: ItemEntity): Boolean {
+        val limit = prefs.value.kidsLimit
+        if (limit <= 0) return true
+        if (item.isAdult) return false
+        if (item.type == ContentType.LIVE) return true   // los canales se filtran por categoría
+        val c = item.cert ?: return false
+        return c <= limit
+    }
+
     // ----- Consultas -----
     @OptIn(ExperimentalCoroutinesApi::class)
     fun categories(type: String): Flow<List<CategoryEntity>> =
-        combine(db.categories().observe(type), showAdult) { list, adult ->
-            list.filter { !it.hidden && (adult || !it.isAdult) }
+        prefs.flow.map { it.kidsLimit }.distinctUntilChanged().flatMapLatestCompat { limit ->
+            if (limit <= 0) combine(db.categories().observe(type), showAdult) { list, adult ->
+                list.filter { !it.hidden && (adult || !it.isAdult) }
+            } else if (type == ContentType.LIVE) db.categories().observe(type).map { list ->
+                list.filter { !it.isAdult && kidsLiveRx.containsMatchIn(it.name) }
+            } else combine(db.categories().observe(type), db.items().observeKidsCategories(type, limit)) { list, ok ->
+                val set = ok.toSet()
+                list.filter { !it.isAdult && it.key in set }
+            }
         }
 
     fun allCategories(): Flow<List<CategoryEntity>> = db.categories().observeAll()
@@ -345,7 +388,7 @@ class Repo(
     @OptIn(ExperimentalCoroutinesApi::class)
     fun categoryItems(categoryKey: String, type: String): Flow<List<ItemEntity>> =
         combine(db.items().observeCategory(categoryKey), showAdult) { list, adult ->
-            val visible = list.filter { adult || !it.isAdult }
+            val visible = list.filter { (adult || !it.isAdult) && kidsOk(it) }
             collapseVariants(visible, type)
         }
 
@@ -362,8 +405,8 @@ class Repo(
         group.filter { it.quality <= max }.maxByOrNull { it.quality } ?: group.minBy { it.quality }
 
     fun recent(type: String, limit: Int = 60): Flow<List<ItemEntity>> =
-        showAdult.flatMapLatestCompat { adult -> db.items().observeRecent(type, adult, limit) }
-            .map { collapseVariants(it, type) }
+        showAdult.flatMapLatestCompat { adult -> db.items().observeRecent(type, adult, if (prefs.value.kidsLimit > 0) limit * 6 else limit) }
+            .map { l -> collapseVariants(l.filter { kidsOk(it) }, type).take(limit) }
 
     /**
      * Busca la frase tal cual, su traducción (títulos conocidos) y por palabras sueltas
@@ -394,7 +437,7 @@ class Repo(
             db.items().raw(androidx.sqlite.db.SimpleSQLiteQuery(sql, args.toTypedArray())).forEach { res.putIfAbsent(it.key, it) }
         }
         val out = ArrayList<ItemEntity>()
-        val byType = res.values.groupBy { it.type }
+        val byType = res.values.filter { kidsOk(it) }.groupBy { it.type }
         for (t in listOf(ContentType.MOVIE, ContentType.SERIES, ContentType.LIVE)) {
             out += collapseVariants(byType[t].orEmpty(), t)
         }
@@ -408,7 +451,7 @@ class Repo(
             val watchedSet = watched.toSet()
             val trackedKeys = tracked.map { it.stableKey }.toSet()
             val seen = HashSet<String>()
-            list.filter { it.stableKey !in watchedSet && seen.add(it.stableKey) }
+            list.filter { it.stableKey !in watchedSet && kidsOk(it) && seen.add(it.stableKey) }
                 .sortedWith(compareByDescending<ItemEntity> { it.stableKey in trackedKeys }.thenByDescending { it.added })
                 .take(10)
         }
@@ -444,14 +487,7 @@ class Repo(
                 for (item in enrichQueue) {
                     try {
                         if (tmdb.enabled) {
-                            val isTv = item.type == ContentType.SERIES
-                            val known = item.stableKey.substringAfter(":").takeIf { it.startsWith("t") }?.drop(1)?.toIntOrNull()
-                            val res = tmdb.genresFor(isTv, item.name, item.year, known)
-                            if (res != null) {
-                                val (genres, d) = res
-                                val bd = d.optString("backdrop_path").takeIf { it.isNotBlank() }?.let { "https://image.tmdb.org/t/p/w1280$it" }
-                                db.items().enrichTmdb(item.stableKey, genres.joinToString(", ").ifBlank { null }, d.optString("overview").ifBlank { null }, bd)
-                            }
+                            enrichWithTmdb(item)
                         } else if (item.type == ContentType.MOVIE) {
                             val a = account() ?: continue
                             val info = client.vodInfo(a, item.streamId)
@@ -469,6 +505,30 @@ class Repo(
         val needed = if (tmdb.enabled) item.enriched < 2 else (item.type == ContentType.MOVIE && item.enriched == 0 && item.genre == null)
         if (!needed) return
         if (enrichRequested.add(item.stableKey)) enrichQueue.trySend(item)
+    }
+
+    /** Id de TMDB del título (lo guarda para la próxima vez). */
+    suspend fun tmdbIdFor(item: ItemEntity, hint: String? = null): Int? {
+        item.tmdbId?.let { return it }
+        val isTv = item.type == ContentType.SERIES
+        val fromKey = item.stableKey.substringAfter(":").takeIf { it.startsWith("t") }?.drop(1)?.toIntOrNull()
+        return hint?.toIntOrNull() ?: fromKey ?: tmdb.findId(isTv, item.name, item.year)
+    }
+
+    /** Géneros, edad, sinopsis y fondo desde TMDB. */
+    suspend fun enrichWithTmdb(item: ItemEntity) {
+        val isTv = item.type == ContentType.SERIES
+        val id = tmdbIdFor(item)
+        if (id == null) { db.items().markTried(item.stableKey); return }
+        val d = tmdb.light(isTv, id)
+        if (d == null) { if (tmdb.lastError == null) db.items().markTried(item.stableKey); return }
+        db.items().enrichTmdb(
+            item.stableKey,
+            tmdb.genres(d).joinToString(", ") { it.second }.ifBlank { null },
+            d.optString("overview").ifBlank { null },
+            TmdbClient.img("w1280", d.optString("backdrop_path")),
+            id, tmdb.certification(d, isTv),
+        )
     }
 
     suspend fun saveVodInfo(item: ItemEntity, info: VodInfo) {
@@ -496,8 +556,13 @@ class Repo(
 
     // ----- Relacionados con TMDB: saga, director, reparto y recomendaciones -----
     /** Busca en tu servidor los títulos que da TMDB (solo enseñamos lo que puedes ver). */
-    private suspend fun matchTitles(titles: List<TmdbTitle>, exclude: String): List<ItemEntity> {
+    internal suspend fun matchTitles(titles: List<TmdbTitle>, exclude: String?): List<ItemEntity> {
         if (titles.isEmpty()) return emptyList()
+        // Primero por id de TMDB (exacto), luego por título y año
+        val byId = HashMap<Pair<Int, Boolean>, List<ItemEntity>>()
+        titles.map { it.id }.distinct().chunked(400).forEach { ids ->
+            db.items().byTmdbIds(ids).groupBy { it.tmdbId!! to (it.type == ContentType.SERIES) }.forEach { (k, v) -> byId[k] = v }
+        }
         val candidates = titles.map { t ->
             val keys = ArrayList<String>()
             val names = listOfNotNull(t.title, t.originalTitle).map { TextUtil.titleKey(it) }.filter { it.isNotBlank() }.distinct()
@@ -520,10 +585,12 @@ class Repo(
             .groupBy { it.stableKey }
         val max = prefs.value.maxQuality
         val out = LinkedHashMap<String, ItemEntity>()
-        candidates.forEach { keys ->
-            val hit = keys.firstNotNullOfOrNull { found[it] } ?: return@forEach
+        candidates.forEachIndexed { i, keys ->
+            val t = titles[i]
+            val hit = byId[t.id to t.isTv]?.filter { !it.isAdult && it.stableKey != exclude }?.takeIf { it.isNotEmpty() }
+                ?: keys.firstNotNullOfOrNull { found[it] } ?: return@forEachIndexed
             val best = hit.filter { it.quality <= max }.maxByOrNull { it.quality } ?: hit.first()
-            out.putIfAbsent(best.stableKey, best)
+            if (kidsOk(best)) out.putIfAbsent(best.stableKey, best)
         }
         return out.values.toList()
     }
@@ -532,16 +599,20 @@ class Repo(
         if (!tmdb.enabled || item.type == ContentType.LIVE) return Related(emptyList())
         val isTv = item.type == ContentType.SERIES
         return try {
-            val fromKey = item.stableKey.substringAfter(":").takeIf { it.startsWith("t") }?.drop(1)?.toIntOrNull()
-            val id = serverTmdbId?.toIntOrNull() ?: fromKey ?: tmdb.findId(isTv, item.name, item.year) ?: return Related(emptyList())
+            val id = tmdbIdFor(item, serverTmdbId) ?: return Related(emptyList())
             val d = tmdb.details(isTv, id) ?: return Related(emptyList())
             // Todo sale de TMDB; tu servidor solo se usa para saber qué tienes disponible.
             val genres = tmdb.genres(d)
             val genreIds = genres.map { it.first }
 
+            var sagaMissing: List<TmdbTitle> = emptyList()
             val saga = d.optJSONObject("belongs_to_collection")?.let { c ->
                 val name = c.optString("name").removeSuffix(" - Colección").removeSuffix(" (Colección)").removePrefix("Colección ")
-                "Saga: $name" to matchTitles(tmdb.collection(c.optInt("id")), item.stableKey)
+                val parts = tmdb.collection(c.optInt("id")).filter { it.id != id }
+                val have = matchTitles(parts, item.stableKey)
+                // Las que no tienes, para verlas en gris
+                sagaMissing = parts.filter { p -> matchTitles(listOf(p), null).isEmpty() }
+                "Saga: $name" to have
             }
             val director = tmdb.directors(d, isTv).firstOrNull()?.let { p ->
                 ((if (isTv) "De los creadores: " else "Más de ") + p.name) to matchTitles(tmdb.personWork(p.id, asDirector = true), item.stableKey)
@@ -551,8 +622,11 @@ class Repo(
             }
 
             // Guardamos los géneros de TMDB en el título para verlos bajo la carátula
-            val bd = d.optString("backdrop_path").takeIf { it.isNotBlank() }?.let { "https://image.tmdb.org/t/p/w1280$it" }
-            db.items().enrichTmdb(item.stableKey, genres.joinToString(", ") { it.second }.ifBlank { null }, d.optString("overview").ifBlank { null }, bd)
+            val cert = tmdb.certification(d, isTv)
+            db.items().enrichTmdb(
+                item.stableKey, genres.joinToString(", ") { it.second }.ifBlank { null }, d.optString("overview").ifBlank { null },
+                TmdbClient.img("w1280", d.optString("backdrop_path")), id, cert,
+            )
 
             // ---- Mismo estilo, coherente ----
             // Géneros «fuertes»: si el título no los tiene, no sugerimos nada que los tenga
@@ -592,17 +666,23 @@ class Repo(
             // Un título solo aparece en la primera fila que le toca.
             val claimed = HashSet<String>()
             val rows = ArrayList<RelatedRow>()
-            fun add(title: String, list: List<ItemEntity>, max: Int = 15) {
+            fun add(title: String, list: List<ItemEntity>, max: Int = 15, missing: List<TmdbTitle> = emptyList()) {
                 val fresh = list.filter { it.stableKey !in claimed }.take(max)
-                if (fresh.isNotEmpty()) { rows += RelatedRow(title, fresh); fresh.forEach { claimed += it.stableKey } }
+                if (fresh.isNotEmpty() || missing.isNotEmpty()) { rows += RelatedRow(title, fresh, missing); fresh.forEach { claimed += it.stableKey } }
             }
+            // La saga va primero si existe: es lo más relacionado; luego el director
+            saga?.let { add(it.first, it.second, 20, sagaMissing) }
             director?.let { add(it.first, it.second) }
-            saga?.let { add(it.first, it.second) }
             studio?.let { add(it.first, it.second) }
             val label = genres.take(3).joinToString(", ") { it.second }
             add(if (label.isBlank()) "Del mismo estilo" else "Del mismo estilo · $label", styleItems, 18)
             cast.forEach { add(it.first, it.second) }
-            Related(rows, genres.map { it.second }, keywords.map { it.second }.take(10))
+            Related(
+                rows, genres.map { it.second }, keywords.map { it.second }.take(10),
+                people = tmdb.people(d, isTv, 8),
+                logo = tmdb.logo(d), trailer = tmdb.trailer(d), runtime = tmdb.runtimeMinutes(d, isTv),
+                cert = cert, tv = if (isTv) tmdb.tvStatus(d) else null, tmdbId = id,
+            )
         } catch (e: Exception) {
             tmdb.lastError = e.message ?: e.javaClass.simpleName
             Related(emptyList())
@@ -637,7 +717,8 @@ class Repo(
                 val byKey = found.groupBy { it.stableKey }
                 items.mapNotNull { fi ->
                     val best = byKey[fi.stableKey]?.let { pickBest(it, prefs.value.maxQuality) }
-                    if (best != null && best.isAdult && !adult) null
+                    if (best != null && ((best.isAdult && !adult) || !kidsOk(best))) null
+                    else if (best == null && prefs.value.kidsLimit > 0) null
                     else fi.toRef(best?.key).copy(icon = best?.icon ?: fi.icon)
                 }
             }
@@ -691,7 +772,8 @@ class Repo(
         val adult = showAdultNow()
         return list.mapNotNull { p ->
             val best = found[p.stableKey]?.let { pickBest(it, prefs.value.maxQuality) }
-            if (best != null && best.isAdult && !adult) null
+            if (best != null && ((best.isAdult && !adult) || !kidsOk(best))) null
+            else if (best == null && prefs.value.kidsLimit > 0) null
             else ContentRef(p.stableKey, p.type, p.title, best?.icon ?: p.icon, best?.year, best?.rating, best?.key, p.updatedAt)
         }
     }

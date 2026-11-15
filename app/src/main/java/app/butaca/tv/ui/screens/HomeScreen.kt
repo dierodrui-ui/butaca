@@ -13,6 +13,18 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.widthIn
+import app.butaca.tv.data.heroExtra
+import app.butaca.tv.data.homeRows
+import app.butaca.tv.data.upcomingNotInServer
+import app.butaca.tv.data.alerts
+import app.butaca.tv.data.alertItem
+import app.butaca.tv.data.setAlert
+import app.butaca.tv.data.removeAlert
+import app.butaca.tv.data.RelatedRow
+import app.butaca.tv.data.TmdbTitle
+import app.butaca.tv.data.AlertEntity
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -72,7 +84,10 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 
-private data class HeroExtra(val backdrop: String?, val plot: String?, val genre: String?)
+private data class HeroData(
+    val backdrop: String?, val plot: String?, val genre: String?,
+    val logo: String? = null, val trailer: String? = null,
+)
 
 private val SidePad = 36.dp
 
@@ -96,6 +111,15 @@ fun HomeScreen(onGoFolders: () -> Unit) {
     val laterAll by laterFlow.collectAsState(initial = emptyList())
     val later = laterAll.filter { laterFilter == "all" || it.type == laterFilter }
     var heroFocused by remember { mutableStateOf(false) }
+    val settings by repo.prefs.flow.collectAsState()
+    // Filas de TMDB: «Porque viste…», tendencias, imprescindibles, de temporada…
+    val discovery by produceState(emptyList<RelatedRow>(), settings.kidsLimit, settings.tmdbKey) { value = repo.homeRows() }
+    val upcoming by produceState(emptyList<TmdbTitle>(), settings.kidsLimit, settings.tmdbKey) { value = repo.upcomingNotInServer() }
+    val alerts by remember { repo.alerts() }.collectAsState(initial = emptyList())
+    val alertKeys = alerts.map { it.key }.toSet()
+    val ready by produceState(emptyList<Pair<AlertEntity, ItemEntity>>(), alerts) {
+        value = alerts.filter { it.available }.mapNotNull { a -> repo.alertItem(a)?.let { a to it } }
+    }
 
     val empty = novedades.isEmpty() && recentMovies.isEmpty() && recentSeries.isEmpty() && continueList.isEmpty()
 
@@ -212,11 +236,51 @@ fun HomeScreen(onGoFolders: () -> Unit) {
                         }
                     }
                 }
+                if (ready.isNotEmpty()) {
+                    item(key = "ready") {
+                        Section("¡Ya en tu servidor! · lo que esperabas") {
+                            TvRow {
+                                items(ready, key = { it.first.key }) { (a, item) ->
+                                    PosterCard(
+                                        title = item.name, icon = item.icon, keySeed = item.stableKey, meta = "Ha llegado",
+                                        isSeries = item.type == ContentType.SERIES,
+                                        onClick = { scope.launch { repo.removeAlert(a) }; nav.openItem(item) },
+                                        onLongClick = { nav.showMenu(MenuRequest(item.toRef())) },
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                discovery.forEachIndexed { i, row ->
+                    item(key = "disc_$i") { ItemRow(row.title, row.items, watched) }
+                }
                 if (recentMovies.isNotEmpty()) {
                     item(key = "recentMovies") { ItemRow("Películas añadidas recientemente", recentMovies, watched) }
                 }
                 if (recentSeries.isNotEmpty()) {
                     item(key = "recentSeries") { ItemRow("Series actualizadas", recentSeries, watched) }
+                }
+                if (upcoming.isNotEmpty()) {
+                    item(key = "upcoming") {
+                        Section("Próximamente en cines · pulsa OK para que te avisemos cuando llegue") {
+                            TvRow {
+                                items(upcoming, key = { "u${it.id}" }) { t ->
+                                    val key = "m${t.id}"
+                                    val on = key in alertKeys
+                                    PosterCard(
+                                        title = t.title, icon = t.poster, keySeed = key,
+                                        meta = if (on) "Te avisaremos" else (t.date?.let { formatDate(it) } ?: "Próximamente"),
+                                        highlighted = on,
+                                        onClick = {
+                                            scope.launch { repo.setAlert(t, !on) }
+                                            nav.toast(if (on) "Aviso quitado" else "Te avisaremos cuando «${t.title}» llegue a tu servidor")
+                                        },
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -254,6 +318,11 @@ private fun ItemRow(title: String, items: List<ItemEntity>, watched: Set<String>
     }
 }
 
+fun formatDate(iso: String): String = try {
+    val d = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).parse(iso)
+    java.text.SimpleDateFormat("d MMM yyyy", java.util.Locale("es", "ES")).format(d!!)
+} catch (_: Exception) { iso }
+
 fun addedLabel(addedSecs: Long): String {
     if (addedSecs <= 0) return "Novedad"
     val days = ((System.currentTimeMillis() / 1000 - addedSecs) / 86400).toInt()
@@ -274,7 +343,7 @@ private fun Hero(items: List<ItemEntity>, onFocus: (Boolean) -> Unit) {
     var index by remember { mutableIntStateOf(0) }
     var focused by remember { mutableStateOf(false) }
     var focusedBtn by remember { mutableIntStateOf(0) }
-    val extras = remember { mutableStateMapOf<String, HeroExtra>() }
+    val extras = remember { mutableStateMapOf<String, HeroData>() }
     val firstBtn = remember { FocusRequester() }
     val laterId by produceState<Long?>(null) { value = repo.systemFolderId("later") }
 
@@ -295,15 +364,18 @@ private fun Hero(items: List<ItemEntity>, onFocus: (Boolean) -> Unit) {
 
     LaunchedEffect(item.key) {
         if (extras[item.key] != null) return@LaunchedEffect
-        val acc = repo.account() ?: return@LaunchedEffect
         val extra = try {
-            if (item.type == ContentType.MOVIE) repo.client.vodInfo(acc, item.streamId)?.let {
-                repo.saveVodInfo(item, it)
-                HeroExtra(it.backdrop ?: item.backdrop, it.plot ?: item.plot, it.genre ?: item.genre)
-            }
-            else HeroExtra(item.backdrop, item.plot, item.genre)
+            // Con TMDB: logo del título, tráiler, fondo y sinopsis en castellano
+            repo.heroExtra(item)?.let { HeroData(it.backdrop ?: item.backdrop, it.plot ?: item.plot, it.genres ?: item.genre, it.logo, it.trailer) }
+                ?: run {
+                    val acc = repo.account() ?: return@run null
+                    if (item.type == ContentType.MOVIE) repo.client.vodInfo(acc, item.streamId)?.let {
+                        repo.saveVodInfo(item, it)
+                        HeroData(it.backdrop ?: item.backdrop, it.plot ?: item.plot, it.genre ?: item.genre)
+                    } else null
+                }
         } catch (_: Exception) { null }
-        extras[item.key] = extra ?: HeroExtra(item.backdrop, item.plot, item.genre)
+        extras[item.key] = extra ?: HeroData(item.backdrop, item.plot, item.genre)
     }
     val extra = extras[item.key]
     val backdrop = extra?.backdrop ?: item.backdrop
@@ -342,10 +414,19 @@ private fun Hero(items: List<ItemEntity>, onFocus: (Boolean) -> Unit) {
                 val kind = if (item.type == ContentType.SERIES) "Serie" else "Película"
                 T("${addedLabel(item.added)} · $kind", size = 12, weight = FontWeight.SemiBold, color = C.TextSoft)
             }
-            T(item.name, size = 34, weight = FontWeight.Bold, maxLines = 2, lineHeight = 38, color = Color.White)
+            val logo = extra?.logo
+            if (logo != null) {
+                AsyncImage(
+                    logo, item.name, contentScale = ContentScale.Fit, alignment = Alignment.CenterStart,
+                    modifier = Modifier.heightIn(max = 96.dp).widthIn(max = 380.dp).padding(vertical = 4.dp),
+                )
+            } else {
+                T(item.name, size = 34, weight = FontWeight.Bold, maxLines = 2, lineHeight = 38, color = Color.White)
+            }
             val meta = listOfNotNull(
                 item.year?.toString(),
                 (extra?.genre ?: item.genre)?.split(',')?.take(3)?.joinToString(", ") { it.trim() },
+                item.cert?.let { if (it == 0) "TP" else "+$it" },
                 item.rating?.let { "★ " + String.format("%.1f", it).replace('.', ',') },
             ).joinToString(" · ")
             if (meta.isNotBlank()) T(meta, size = 14, color = C.TextSoft)
@@ -358,7 +439,7 @@ private fun Hero(items: List<ItemEntity>, onFocus: (Boolean) -> Unit) {
                     .onPreviewKeyEvent { e ->
                         if (e.type != KeyEventType.KeyDown || items.size < 2) return@onPreviewKeyEvent false
                         when {
-                            e.key == Key.DirectionRight && focusedBtn == 1 -> { index = (safeIndex + 1) % items.size; true }
+                            e.key == Key.DirectionRight && focusedBtn == (if (extra?.trailer != null) 2 else 1) -> { index = (safeIndex + 1) % items.size; true }
                             e.key == Key.DirectionLeft && focusedBtn == 0 && safeIndex > 0 -> { index = safeIndex - 1; true }
                             else -> false
                         }
@@ -380,6 +461,12 @@ private fun Hero(items: List<ItemEntity>, onFocus: (Boolean) -> Unit) {
                     onClick = { if (lid != null) scope.launch { repo.toggleFolder(lid, item.toRef(), inLater) } },
                     modifier = Modifier.onFocusChanged { if (it.isFocused) focusedBtn = 1 },
                 )
+                extra?.trailer?.let { key ->
+                    ActionButton(
+                        "Tráiler", Ic.Film, onClick = { nav.openTrailer(key) },
+                        modifier = Modifier.onFocusChanged { if (it.isFocused) focusedBtn = 2 },
+                    )
+                }
             }
             if (items.size > 1) {
                 Row(
