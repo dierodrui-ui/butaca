@@ -34,6 +34,8 @@ import app.butaca.tv.data.ItemEntity
 import app.butaca.tv.data.toRef
 import app.butaca.tv.data.SearchExtras
 import app.butaca.tv.data.searchExtras
+import app.butaca.tv.data.explorerGroups
+import androidx.compose.runtime.produceState
 import app.butaca.tv.ui.C
 import app.butaca.tv.ui.components.EmptyState
 import app.butaca.tv.ui.components.MenuRequest
@@ -73,6 +75,9 @@ fun SearchScreen() {
     }
     val watched by remember { repo.watchedKeys() }.collectAsState(initial = emptySet())
     val field = remember { FocusRequester() }
+    // Explorador por etiquetas (se ve con el cuadro de búsqueda vacío)
+    val explorer = rememberExplorer(emptyList())
+    val groups by produceState(emptyList<app.butaca.tv.data.TagGroup>()) { value = repo.explorerGroups(false) }
     val focusManager = LocalFocusManager.current
     LaunchedEffect(Unit) { delay(200); requestFocusSafely(field) }
 
@@ -110,6 +115,12 @@ fun SearchScreen() {
                     )
                     T("Títulos en español o inglés, personas («Tom Hanks», «Almodóvar») o temas («zombis», «navidad»). Pulsa ✓ o Atrás para cerrar el teclado.", size = 13, color = C.Muted)
                 }
+            }
+            if (query.isBlank() && groups.isNotEmpty()) {
+                item(key = "ex_intro", span = { GridItemSpan(maxLineSpan) }) {
+                    SectionTitle("O explora por etiquetas", Modifier.padding(top = 8.dp), extra = "marca varias para afinar")
+                }
+                explorerItems(explorer, groups, watched, nav, repo)
             }
             if (query.trim().length >= 2) {
                 item(key = "filters", span = { GridItemSpan(maxLineSpan) }) {

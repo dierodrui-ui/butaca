@@ -50,6 +50,7 @@ import app.butaca.tv.data.ContentType
 import app.butaca.tv.data.Episode
 import app.butaca.tv.data.ItemEntity
 import app.butaca.tv.data.Related
+import app.butaca.tv.data.TagKind
 import app.butaca.tv.data.TmdbTitle
 import app.butaca.tv.data.TmdbPerson
 import app.butaca.tv.data.TmdbEpisode
@@ -171,22 +172,27 @@ private fun SecondaryActions(item: ItemEntity, onPicker: () -> Unit) {
     )
 }
 
-/** Géneros y etiquetas de TMDB, para ver de un vistazo de qué va. */
+/** Géneros, estudio y temas de TMDB. Al pulsar uno, todo lo que tienes de esa etiqueta. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun TagChips(related: Related?) {
-    val genres = related?.genres.orEmpty()
-    val tags = related?.tags.orEmpty()
-    if (genres.isEmpty() && tags.isEmpty()) return
+    val tags = related?.tagObjs.orEmpty()
+    if (tags.isEmpty()) return
+    val nav = LocalNav.current
     FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        genres.forEach { g ->
-            Box(Modifier.clip(RoundedCornerShape(999.dp)).background(Color(0x33FFB020)).padding(horizontal = 10.dp, vertical = 4.dp)) {
-                T(g, size = 12, weight = FontWeight.SemiBold, color = C.Accent)
-            }
-        }
         tags.forEach { t ->
-            Box(Modifier.clip(RoundedCornerShape(999.dp)).background(Color(0x22FFFFFF)).padding(horizontal = 10.dp, vertical = 4.dp)) {
-                T("#$t", size = 12, color = C.TextSoft)
+            val (bg, fg, label) = when (t.kind) {
+                TagKind.GENRE -> Triple(Color(0x33FFB020), C.Accent, t.name)
+                TagKind.COMPANY, TagKind.NETWORK -> Triple(Color(0x337FA8FF), Color(0xFF9DBBFF), t.name)
+                TagKind.KEYWORD -> Triple(Color(0x22FFFFFF), C.TextSoft, "#" + t.name)
+            }
+            FocusSurface(
+                onClick = { nav.openExplore(listOf(t)) },
+                modifier = Modifier.height(28.dp),
+                radius = 999.dp, container = bg, focusedContainer = bg, content = fg, focusedContent = fg,
+                focusedScale = 1.08f, borderWidth = 2.dp,
+            ) {
+                T(label, size = 12, weight = FontWeight.SemiBold, color = fg, maxLines = 1, modifier = Modifier.align(Alignment.Center).padding(horizontal = 10.dp))
             }
         }
     }

@@ -50,6 +50,7 @@ class AppNav(
     val openFolder: (Long) -> Unit,
     val openPerson: (Int) -> Unit,
     val openTrailer: (String) -> Unit,
+    val openExplore: (List<app.butaca.tv.data.Tag>) -> Unit,
 )
 
 val LocalNav = staticCompositionLocalOf<AppNav> { error("Sin navegación") }
@@ -122,6 +123,7 @@ fun AppRoot() {
                 nav.popBackStack("main", inclusive = false)
             },
             openPerson = { id -> nav.navigate("person/$id") },
+            openExplore = { tags -> app.butaca.tv.data.ExploreNav.pending = tags; nav.navigate("explore") },
             openTrailer = { key ->
                 // La app de YouTube de Google TV; si no está, el navegador
                 val yt = android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse("vnd.youtube:$key"))
@@ -166,6 +168,9 @@ fun AppRoot() {
                 }
                 composable("person/{id}", arguments = listOf(navArgument("id") { type = NavType.IntType })) { e ->
                     PersonScreen(e.arguments?.getInt("id") ?: 0, onBack = { nav.popBackStack() })
+                }
+                composable("explore") {
+                    app.butaca.tv.ui.screens.ExploreScreen(app.butaca.tv.data.ExploreNav.pending, onBack = { nav.popBackStack() })
                 }
                 composable("player") {
                     val req = repo.pendingPlay

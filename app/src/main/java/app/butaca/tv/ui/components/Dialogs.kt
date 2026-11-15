@@ -63,9 +63,29 @@ import kotlinx.coroutines.launch
 
 @Composable
 fun AppDialog(onDismiss: () -> Unit, width: Int = 460, content: @Composable ColumnScope.() -> Unit) {
+    // Si el menú se abrió manteniendo OK, el «soltar» de ese botón no debe pulsar la primera opción.
+    // Ignoramos las teclas hasta que se suelte el botón (o pase un momento sin pulsar nada).
+    val opened = remember { System.currentTimeMillis() }
+    var armed by remember { mutableStateOf(false) }
+    var lastDown by remember { mutableStateOf(0L) }
+    LaunchedEffect(Unit) {
+        while (!armed) {
+            delay(120)
+            val now = System.currentTimeMillis()
+            if (now - opened > 450 && now - lastDown > 350) armed = true
+        }
+    }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Column(
             Modifier
+                .onPreviewKeyEvent { e ->
+                    if (armed) false
+                    else {
+                        if (e.type == KeyEventType.KeyDown) lastDown = System.currentTimeMillis()
+                        if (e.type == KeyEventType.KeyUp) armed = true
+                        e.key != Key.Back
+                    }
+                }
                 .width(width.dp)
                 .clip(RoundedCornerShape(18.dp))
                 .background(C.Surface)

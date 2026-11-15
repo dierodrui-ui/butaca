@@ -270,6 +270,12 @@ interface ItemDao {
     @Query("SELECT * FROM item WHERE tmdbId = :tmdbId AND type = :type")
     suspend fun byTmdbId(tmdbId: Int, type: String): List<ItemEntity>
 
+    @Query("SELECT genre FROM item WHERE genre IS NOT NULL AND isAdult = 0 AND type IN ('movie','series')")
+    suspend fun allGenres(): List<String>
+
+    @Query("SELECT * FROM item WHERE type IN ('movie','series') AND isAdult = 0 AND genre LIKE '%' || :genre || '%' ORDER BY rating DESC LIMIT :limit")
+    suspend fun withGenre(genre: String, limit: Int): List<ItemEntity>
+
     @Query("SELECT * FROM item WHERE tmdbId IN (:ids)")
     suspend fun byTmdbIds(ids: List<Int>): List<ItemEntity>
 

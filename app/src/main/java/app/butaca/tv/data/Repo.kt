@@ -78,6 +78,8 @@ data class Related(
     val cert: Int? = null,
     val tv: TvStatus? = null,
     val tmdbId: Int? = null,
+    /** Etiquetas pulsables: géneros, temas y estudio. */
+    val tagObjs: List<Tag> = emptyList(),
 )
 
 class Repo(
@@ -682,6 +684,9 @@ class Repo(
                 people = tmdb.people(d, isTv, 8),
                 logo = tmdb.logo(d), trailer = tmdb.trailer(d), runtime = tmdb.runtimeMinutes(d, isTv),
                 cert = cert, tv = if (isTv) tmdb.tvStatus(d) else null, tmdbId = id,
+                tagObjs = genres.map { (gid, name) -> if (isTv) Tag(TagKind.GENRE, name, null, gid) else Tag(TagKind.GENRE, name, gid, null) } +
+                    tmdb.studios(d, isTv).take(2).map { st -> Tag(if (st.isNetwork) TagKind.NETWORK else TagKind.COMPANY, st.name, st.id, st.id) } +
+                    keywords.take(10).map { (kid, name) -> Tag(TagKind.KEYWORD, name, kid, kid) },
             )
         } catch (e: Exception) {
             tmdb.lastError = e.message ?: e.javaClass.simpleName

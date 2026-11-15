@@ -433,6 +433,31 @@ class TmdbClient(
         return out.toList()
     }
 
+    // ===================== Etiquetas (explorador) =====================
+
+    /** Lista oficial de géneros en castellano. */
+    suspend fun genreList(isTv: Boolean): List<Pair<Int, String>> {
+        val arr = get("/genre/${if (isTv) "tv" else "movie"}/list", mapOf("language" to "es-ES"), ttlHours = 24 * 30)?.optJSONArray("genres")
+            ?: return emptyList()
+        return (0 until arr.length()).mapNotNull { arr.optJSONObject(it) }.map { it.optInt("id") to it.optString("name") }
+    }
+
+    /** Id de una palabra clave (en inglés) de TMDB. */
+    suspend fun keywordId(term: String): Int? {
+        val arr = get("/search/keyword", mapOf("query" to term), ttlHours = 24 * 30)?.optJSONArray("results") ?: return null
+        val list = (0 until arr.length()).mapNotNull { arr.optJSONObject(it) }
+        val t = TextUtil.norm(term)
+        return (list.firstOrNull { TextUtil.norm(it.optString("name")) == t } ?: list.firstOrNull())?.optInt("id")?.takeIf { it > 0 }
+    }
+
+    /** Id de un estudio/productora por su nombre. */
+    suspend fun companyId(name: String): Int? {
+        val arr = get("/search/company", mapOf("query" to name), ttlHours = 24 * 30)?.optJSONArray("results") ?: return null
+        val list = (0 until arr.length()).mapNotNull { arr.optJSONObject(it) }
+        val n = TextUtil.norm(name)
+        return (list.firstOrNull { TextUtil.norm(it.optString("name")) == n } ?: list.firstOrNull())?.optInt("id")?.takeIf { it > 0 }
+    }
+
     // ===================== Estudios =====================
 
     data class Studio(val id: Int, val name: String, val isNetwork: Boolean)

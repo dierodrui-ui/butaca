@@ -347,3 +347,147 @@ suspend fun Repo.cloudSync(): String {
         Cloud.running.value = false
     }
 }
+
+// ---------------- Explorador por etiquetas ----------------
+
+enum class TagKind { GENRE, KEYWORD, COMPANY, NETWORK }
+
+/** Una etiqueta del explorador. Los géneros tienen id distinto en películas y en series. */
+data class Tag(val kind: TagKind, val name: String, val movieId: Int? = null, val tvId: Int? = null) {
+    val key: String get() = "${kind.name}:$name"
+}
+
+data class TagGroup(val title: String, val tags: List<Tag>, val visible: Int = 10)
+
+/** Etiquetas pendientes de abrir desde una ficha (al pulsar un género, un tema o un estudio). */
+object ExploreNav {
+    @Volatile var pending: List<Tag> = emptyList()
+}
+
+// Temas: nombre en castellano → palabra clave de TMDB (en inglés). Ordenados por importancia.
+private val TOPICS = listOf(
+    "Basada en hechos reales" to "based on true story", "Navidad" to "christmas", "Superhéroes" to "superhero",
+    "Basada en novela" to "based on novel or book", "Venganza" to "revenge", "Viajes en el tiempo" to "time travel",
+    "Atracos" to "heist", "Espías" to "spy", "Mafia" to "mafia", "Asesino en serie" to "serial killer",
+    "Amistad" to "friendship", "Crecer" to "coming of age", "Familia" to "family relationships", "Zombis" to "zombie",
+    "Distopía" to "dystopia", "Segunda Guerra Mundial" to "world war ii", "Espacio" to "space", "Extraterrestres" to "alien",
+    "Robots" to "robot", "Inteligencia artificial" to "artificial intelligence", "Vampiros" to "vampire",
+    "Dinosaurios" to "dinosaur", "Magia" to "magic", "Princesas" to "princess", "Animales" to "animal",
+    "Deporte" to "sports", "Fútbol" to "soccer", "Boxeo" to "boxing", "Juicios" to "courtroom", "Política" to "politics",
+    "Periodismo" to "journalism", "Policías" to "police", "Supervivencia" to "survival", "Desastres" to "disaster",
+    "Música" to "musician", "Cocina" to "cooking", "Instituto" to "high school", "Basada en cómic" to "based on comic",
+    "Road movie" to "road movie", "Remake" to "remake",
+)
+
+// Estudios por orden de importancia (el id se busca en TMDB la primera vez)
+private val STUDIOS = listOf(
+    "Walt Disney Pictures", "Pixar", "Marvel Studios", "Warner Bros. Pictures", "Universal Pictures", "Paramount Pictures",
+    "Columbia Pictures", "20th Century Fox", "DreamWorks Animation", "Lucasfilm Ltd.", "Illumination", "Studio Ghibli",
+    "A24", "Legendary Pictures", "Blumhouse Productions", "Lionsgate", "New Line Cinema", "Metro-Goldwyn-Mayer",
+    "Amblin Entertainment", "Atresmedia Cine", "Telecinco Cinema", "El Deseo", "Netflix", "Sony Pictures Animation",
+)
+
+// Plataformas de series (ids de cadena en TMDB)
+private val NETWORKS = listOf("Netflix" to 213, "HBO" to 49, "Prime Video" to 1024, "Disney+" to 2739, "Apple TV+" to 2552)
+
+// Equivalencias de géneros de película → serie
+private val TV_EQUIV = mapOf(28 to 10759, 12 to 10759, 878 to 10765, 14 to 10765, 10752 to 10768)
+
+private object TagCache {
+    var genres: List<Tag> = emptyList()
+    val keywords = HashMap<String, Int?>()
+    val companies = HashMap<String, Int?>()
+}
+
+/** Géneros con sus ids de película y de serie. */
+suspend fun Repo.genreTags(): List<Tag> {
+    if (TagCache.genres.isNotEmpty()) return TagCache.genres
+    val movie = tmdb.genreList(false)
+    val tv = tmdb.genreList(true)
+    val tvByName = tv.associate { TextUtil.norm(it.second) to it.first }
+    val tags = movie.map { (id, name) -> Tag(TagKind.GENRE, name, id, tvByName[TextUtil.norm(name)] ?: TV_EQUIV[id]) }
+    if (tags.isNotEmpty()) TagCache.genres = tags
+    return tags
+}
+
+/** Grupos de etiquetas, de más a menos importantes. */
+suspend fun Repo.explorerGroups(includeSlow: Boolean): List<TagGroup> {
+    if (!tmdb.enabled) return emptyList()
+    // Géneros: los que más hay en tu servidor, primero
+    val counts = HashMap<String, Int>()
+    db.items().allGenres().forEach { g -> g.split(',').map { it.trim() }.filter { it.isNotBlank() }.forEach { counts[it] = (counts[it] ?: 0) + 1 } }
+    val genres = genreTags().sortedByDescending { counts[it.name] ?: 0 }
+    val groups = arrayListOf(TagGroup("Géneros", genres, 12))
+    groups += TagGroup("Temas", TOPICS.map { Tag(TagKind.KEYWORD, it.first) }, 12)
+    groups += TagGroup("Estudios", STUDIOS.map { Tag(TagKind.COMPANY, it) }, 10)
+    groups += TagGroup("Plataformas (series)", NETWORKS.map { Tag(TagKind.NETWORK, it.first, null, it.second) }, 5)
+    if (includeSlow) Unit
+    return groups
+}
+
+/** Completa los ids que faltan (temas y estudios se buscan en TMDB la primera vez). */
+private suspend fun Repo.resolve(tag: Tag): Tag = when (tag.kind) {
+    TagKind.GENRE -> genreTags().firstOrNull { TextUtil.norm(it.name) == TextUtil.norm(tag.name) }
+        ?: tag
+    TagKind.KEYWORD -> {
+        if (tag.movieId != null) tag else {
+            val term = TOPICS.firstOrNull { it.first == tag.name }?.second ?: tag.name
+            val id = TagCache.keywords.getOrPut(term) { tmdb.keywordId(term) }
+            tag.copy(movieId = id, tvId = id)
+        }
+    }
+    TagKind.COMPANY -> {
+        if (tag.movieId != null) tag else {
+            val id = TagCache.companies.getOrPut(tag.name) { tmdb.companyId(tag.name) }
+            tag.copy(movieId = id, tvId = id)
+        }
+    }
+    TagKind.NETWORK -> tag
+}
+
+/** Todo lo de tu servidor que encaja con TODAS las etiquetas elegidas. */
+suspend fun Repo.explore(selected: List<Tag>): List<ItemEntity> {
+    if (selected.isEmpty() || !tmdb.enabled) return emptyList()
+    val tags = selected.map { resolve(it) }
+    val genres = tags.filter { it.kind == TagKind.GENRE }
+    val kws = tags.filter { it.kind == TagKind.KEYWORD }.mapNotNull { it.movieId }
+    val comps = tags.filter { it.kind == TagKind.COMPANY }.mapNotNull { it.movieId }
+    val nets = tags.filter { it.kind == TagKind.NETWORK }.mapNotNull { it.tvId }
+
+    suspend fun run(kwJoin: String): List<TmdbTitle> {
+        val out = ArrayList<TmdbTitle>()
+        // Películas (las plataformas solo aplican a series)
+        if (nets.isEmpty() && genres.all { it.movieId != null }) {
+            val p = HashMap<String, String>()
+            if (genres.isNotEmpty()) p["with_genres"] = genres.mapNotNull { it.movieId }.distinct().joinToString(",")
+            if (kws.isNotEmpty()) p["with_keywords"] = kws.joinToString(kwJoin)
+            if (comps.isNotEmpty()) p["with_companies"] = comps.joinToString("|")
+            if (p.isNotEmpty()) out += tmdb.discover(false, emptyList(), 6, p)
+        }
+        // Series
+        if (genres.all { it.tvId != null }) {
+            val p = HashMap<String, String>()
+            if (genres.isNotEmpty()) p["with_genres"] = genres.mapNotNull { it.tvId }.distinct().joinToString(",")
+            if (kws.isNotEmpty()) p["with_keywords"] = kws.joinToString(kwJoin)
+            if (comps.isNotEmpty()) p["with_companies"] = comps.joinToString("|")
+            if (nets.isNotEmpty()) p["with_networks"] = nets.joinToString("|")
+            if (p.isNotEmpty()) out += tmdb.discover(true, emptyList(), 4, p)
+        }
+        return out
+    }
+
+    var found = matchTitles(run(","), null)
+    // Con varios temas, si casi no hay nada que los tenga todos, basta con alguno
+    if (found.size < 6 && kws.size > 1) found = (found + matchTitles(run("|"), null)).distinctBy { it.stableKey }
+
+    // Además, títulos de tu servidor cuyo género de TMDB ya está guardado (aunque no salgan entre los más vistos)
+    if (genres.isNotEmpty() && kws.isEmpty() && comps.isEmpty() && nets.isEmpty()) {
+        val names = genres.map { it.name }
+        val local = db.items().withGenre(names.first(), 400)
+            // solo títulos cuyos géneros ya vienen de TMDB (enriched = 2), nunca los del servidor
+            .filter { i -> i.enriched >= 2 && names.all { n -> i.genre?.contains(n, true) == true } && !i.isAdult && kidsOk(i) }
+        found = (found + collapseVariants(local.filter { it.type == ContentType.MOVIE }, ContentType.MOVIE) +
+            collapseVariants(local.filter { it.type == ContentType.SERIES }, ContentType.SERIES)).distinctBy { it.stableKey }
+    }
+    return found
+}
