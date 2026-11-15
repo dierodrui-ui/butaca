@@ -146,7 +146,7 @@ private fun SyncBanner(modifier: Modifier) {
     val cloudRunning by app.butaca.tv.data.Cloud.running.collectAsState()
     val text = when {
         s.running || s.error != null -> s.error ?: s.message
-        kids != null -> "Preparando el perfil infantil… ${kids!!.first} de ${kids!!.second}"
+        kids != null -> "Leyendo géneros en TMDB… ${kids!!.first} de ${kids!!.second}"
         cloudRunning -> "Copiando tus listas en TMDB…"
         else -> return
     }

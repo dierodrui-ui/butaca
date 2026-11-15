@@ -173,7 +173,7 @@ class Repo(
             else refreshTrackedSeries()
             // Copia en la nube cada 6 horas si tienes cuenta de TMDB conectada
             if (prefs.value.tmdbSession.isNotBlank() && System.currentTimeMillis() - prefs.value.lastCloudSync > 6 * 3600_000L) cloudSync()
-            if (prefs.value.kidsLimit > 0) startKidsPrep()
+            startKidsPrep()   // lee géneros y edades de todo el catálogo en TMDB (una vez)
         }
     }
 
@@ -194,7 +194,7 @@ class Repo(
             _sync.value = SyncState(true, "Buscando episodios nuevos…")
             refreshTrackedSeries()
             try { checkAlerts() } catch (_: Exception) { }
-            if (prefs.value.kidsLimit > 0) startKidsPrep()
+            startKidsPrep()   // lee géneros y edades de todo el catálogo en TMDB (una vez)
             _sync.value = SyncState(false, "")
         } catch (e: Exception) {
             _sync.value = SyncState(false, "", "No se pudo actualizar el catálogo: ${e.message ?: "error de red"}")

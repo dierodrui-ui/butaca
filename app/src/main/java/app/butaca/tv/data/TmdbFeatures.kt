@@ -204,7 +204,7 @@ fun Repo.startKidsPrep() {
             val batch = db.items().pendingEnrich(40)
             if (batch.isEmpty()) break
             val before = db.items().pendingEnrichCount()
-            batch.chunked(4).forEach { group ->
+            batch.chunked(6).forEach { group ->
                 coroutineScope { group.map { async { try { enrichWithTmdb(it) } catch (_: Exception) { } } }.awaitAll() }
             }
             done += batch.size
@@ -405,7 +405,11 @@ suspend fun Repo.genreTags(): List<Tag> {
     val movie = tmdb.genreList(false)
     val tv = tmdb.genreList(true)
     val tvByName = tv.associate { TextUtil.norm(it.second) to it.first }
-    val tags = movie.map { (id, name) -> Tag(TagKind.GENRE, name, id, tvByName[TextUtil.norm(name)] ?: TV_EQUIV[id]) }
+    val movieTags = movie.map { (id, name) -> Tag(TagKind.GENRE, name, id, tvByName[TextUtil.norm(name)] ?: TV_EQUIV[id]) }
+    // Géneros que solo existen en series (Infantil, Reality, Telenovela…)
+    val usedTv = movieTags.mapNotNull { it.tvId }.toSet()
+    val tvOnly = tv.filter { it.first !in usedTv }.map { (id, name) -> Tag(TagKind.GENRE, name, null, id) }
+    val tags = movieTags + tvOnly
     if (tags.isNotEmpty()) TagCache.genres = tags
     return tags
 }
@@ -445,6 +449,17 @@ private suspend fun Repo.resolve(tag: Tag): Tag = when (tag.kind) {
     TagKind.NETWORK -> tag
 }
 
+/** Nombres con los que un género puede estar guardado (en películas y en series se llaman distinto a veces). */
+private suspend fun Repo.genreNames(tag: Tag): List<String> {
+    val names = LinkedHashSet<String>()
+    names += tag.name
+    val movie = tmdb.genreList(false)
+    val tv = tmdb.genreList(true)
+    tag.movieId?.let { id -> movie.firstOrNull { it.first == id }?.let { names += it.second } }
+    tag.tvId?.let { id -> tv.firstOrNull { it.first == id }?.let { names += it.second } }
+    return names.toList()
+}
+
 /** Todo lo de tu servidor que encaja con TODAS las etiquetas elegidas. */
 suspend fun Repo.explore(selected: List<Tag>): List<ItemEntity> {
     if (selected.isEmpty() || !tmdb.enabled) return emptyList()
@@ -453,41 +468,52 @@ suspend fun Repo.explore(selected: List<Tag>): List<ItemEntity> {
     val kws = tags.filter { it.kind == TagKind.KEYWORD }.mapNotNull { it.movieId }
     val comps = tags.filter { it.kind == TagKind.COMPANY }.mapNotNull { it.movieId }
     val nets = tags.filter { it.kind == TagKind.NETWORK }.mapNotNull { it.tvId }
+    val onlyGenres = kws.isEmpty() && comps.isEmpty() && nets.isEmpty()
 
+    // 1) Tu catálogo: cada título guarda sus géneros de TMDB, así salen TODOS los que tienes (películas y series)
+    val genreNames = genres.map { genreNames(it) }
+    fun hasGenres(i: ItemEntity): Boolean {
+        val g = i.genre?.split(',')?.map { TextUtil.norm(it.trim()) }?.toSet() ?: return false
+        return genreNames.all { alts -> alts.any { TextUtil.norm(it) in g } }
+    }
+    val local: List<ItemEntity> = if (genres.isEmpty()) emptyList() else {
+        genreNames.first().flatMap { db.items().withTmdbGenre(it) }.distinctBy { it.key }
+            .filter { !it.isAdult && kidsOk(it) && hasGenres(it) }
+    }
+
+    // 2) TMDB discover: para temas, estudios y plataformas (y para lo que aún no se ha leído de tu catálogo)
     suspend fun run(kwJoin: String): List<TmdbTitle> {
+        val pages = if (onlyGenres) 5 else 15   // con temas/estudios la lista es corta: la recorremos entera
         val out = ArrayList<TmdbTitle>()
-        // Películas (las plataformas solo aplican a series)
         if (nets.isEmpty() && genres.all { it.movieId != null }) {
             val p = HashMap<String, String>()
             if (genres.isNotEmpty()) p["with_genres"] = genres.mapNotNull { it.movieId }.distinct().joinToString(",")
             if (kws.isNotEmpty()) p["with_keywords"] = kws.joinToString(kwJoin)
             if (comps.isNotEmpty()) p["with_companies"] = comps.joinToString("|")
-            if (p.isNotEmpty()) out += tmdb.discover(false, emptyList(), 6, p)
+            if (p.isNotEmpty()) out += tmdb.discover(false, emptyList(), pages, p)
         }
-        // Series
         if (genres.all { it.tvId != null }) {
             val p = HashMap<String, String>()
             if (genres.isNotEmpty()) p["with_genres"] = genres.mapNotNull { it.tvId }.distinct().joinToString(",")
             if (kws.isNotEmpty()) p["with_keywords"] = kws.joinToString(kwJoin)
             if (comps.isNotEmpty()) p["with_companies"] = comps.joinToString("|")
             if (nets.isNotEmpty()) p["with_networks"] = nets.joinToString("|")
-            if (p.isNotEmpty()) out += tmdb.discover(true, emptyList(), 4, p)
+            if (p.isNotEmpty()) out += tmdb.discover(true, emptyList(), pages, p)
         }
         return out
     }
 
     var found = matchTitles(run(","), null)
-    // Con varios temas, si casi no hay nada que los tenga todos, basta con alguno
     if (found.size < 6 && kws.size > 1) found = (found + matchTitles(run("|"), null)).distinctBy { it.stableKey }
 
-    // Además, títulos de tu servidor cuyo género de TMDB ya está guardado (aunque no salgan entre los más vistos)
-    if (genres.isNotEmpty() && kws.isEmpty() && comps.isEmpty() && nets.isEmpty()) {
-        val names = genres.map { it.name }
-        val local = db.items().withGenre(names.first(), 400)
-            // solo títulos cuyos géneros ya vienen de TMDB (enriched = 2), nunca los del servidor
-            .filter { i -> i.enriched >= 2 && names.all { n -> i.genre?.contains(n, true) == true } && !i.isAdult && kidsOk(i) }
-        found = (found + collapseVariants(local.filter { it.type == ContentType.MOVIE }, ContentType.MOVIE) +
-            collapseVariants(local.filter { it.type == ContentType.SERIES }, ContentType.SERIES)).distinctBy { it.stableKey }
+    // Con solo géneros: lo más popular primero y después todo lo demás de tu catálogo, por nota
+    val merged = if (onlyGenres) {
+        val rest = local.sortedByDescending { it.rating ?: 0.0 }
+        found + collapseVariants(rest.filter { it.type == ContentType.MOVIE }, ContentType.MOVIE) +
+            collapseVariants(rest.filter { it.type == ContentType.SERIES }, ContentType.SERIES)
+    } else {
+        // Con temas o estudios, si además hay géneros, que también los cumplan
+        if (genres.isEmpty()) found else found.filter { it.genre == null || it.tmdbId == null || hasGenres(it) }
     }
-    return found
+    return merged.distinctBy { it.stableKey }
 }

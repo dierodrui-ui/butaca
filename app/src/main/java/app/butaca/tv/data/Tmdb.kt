@@ -363,8 +363,10 @@ class TmdbClient(
             val params = mutableMapOf("language" to "es-ES", "sort_by" to "vote_count.desc", "page" to p.toString())
             if (genreIds.isNotEmpty()) params["with_genres"] = genreIds.joinToString(",")
             params.putAll(extra)
-            val res = get(path, params)?.optJSONArray("results") ?: break
+            val obj = get(path, params) ?: break
+            val res = obj.optJSONArray("results") ?: break
             out += parseList(res, isTv)
+            if (p >= obj.optInt("total_pages", 1)) break
         }
         return out
     }

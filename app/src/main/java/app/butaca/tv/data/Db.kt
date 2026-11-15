@@ -276,6 +276,10 @@ interface ItemDao {
     @Query("SELECT * FROM item WHERE type IN ('movie','series') AND isAdult = 0 AND genre LIKE '%' || :genre || '%' ORDER BY rating DESC LIMIT :limit")
     suspend fun withGenre(genre: String, limit: Int): List<ItemEntity>
 
+    /** Títulos cuyo género viene de TMDB (con id de TMDB), sin límite. */
+    @Query("SELECT * FROM item WHERE type IN ('movie','series') AND isAdult = 0 AND tmdbId IS NOT NULL AND genre LIKE '%' || :genre || '%'")
+    suspend fun withTmdbGenre(genre: String): List<ItemEntity>
+
     @Query("SELECT * FROM item WHERE tmdbId IN (:ids)")
     suspend fun byTmdbIds(ids: List<Int>): List<ItemEntity>
 
