@@ -322,6 +322,21 @@ data class KeyAdded(val key: String, val added: Long)
 
 data class KeyMark(val stableKey: String, val system: String)
 
+/** Lo que has visto o empezado, con lo necesario para calcular el % visto. */
+data class ActivityRow(
+    val stableKey: String, val type: String, val title: String, val icon: String?,
+    val positionMs: Long, val durationMs: Long, val finished: Boolean, val updatedAt: Long,
+    val season: Int?, val episode: Int?, val epsDone: Int, val epsTotal: Int?,
+) {
+    /** 0..1 (1 = vista entera). */
+    val fraction: Float get() = when {
+        finished -> 1f
+        type == ContentType.SERIES && (epsTotal ?: 0) > 0 -> (epsDone.toFloat() / epsTotal!!).coerceIn(0f, 0.99f)
+        durationMs > 0 -> (positionMs.toFloat() / durationMs).coerceIn(0f, 0.99f)
+        else -> 0f
+    }
+}
+
 /** Lo justo de cada título para calcular el «% para ti». */
 data class MatchRow(val stableKey: String, val type: String, val genre: String?, val rating: Double?, val tmdbId: Int?)
 
@@ -400,6 +415,15 @@ interface ProgressDao {
 
     @Query("SELECT * FROM progress WHERE finished = 1 ORDER BY updatedAt DESC")
     fun observeWatched(): Flow<List<ProgressEntity>>
+
+    @Query(
+        "SELECT p.stableKey AS stableKey, p.type AS type, p.title AS title, p.icon AS icon, p.positionMs AS positionMs, " +
+            "p.durationMs AS durationMs, p.finished AS finished, p.updatedAt AS updatedAt, p.season AS season, p.episode AS episode, " +
+            "(SELECT COUNT(*) FROM episode_progress e WHERE e.seriesKey = p.stableKey AND e.finished = 1) AS epsDone, " +
+            "(SELECT t.knownEpisodes FROM tracked_series t WHERE t.stableKey = p.stableKey) AS epsTotal " +
+            "FROM progress p WHERE p.finished = 1 OR p.positionMs > 0 ORDER BY p.updatedAt DESC"
+    )
+    fun observeActivity(): Flow<List<ActivityRow>>
 
     @Query("SELECT stableKey FROM progress WHERE finished = 1")
     fun observeWatchedKeys(): Flow<List<String>>

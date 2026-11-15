@@ -133,11 +133,12 @@ fun HomeScreen(onGoFolders: () -> Unit) {
     Column(Modifier.fillMaxSize()) {
     if (novedades.isNotEmpty()) Hero(novedades, onFocus = { f -> heroFocused = f })
     Box(Modifier.fillMaxWidth().weight(1f)) {
-        PivotScope(pivot = 30.dp) {
+        // El título de la fila con foco queda siempre visible bajo el destacado
+        PivotScope(pivot = 44.dp) {
             LazyColumn(
                 Modifier.fillMaxSize(),
                 state = listState,
-                contentPadding = PaddingValues(top = 14.dp, bottom = 90.dp),
+                contentPadding = PaddingValues(top = 30.dp, bottom = 90.dp),
                 verticalArrangement = Arrangement.spacedBy(22.dp),
             ) {
                 if (empty) {
@@ -284,7 +285,7 @@ fun HomeScreen(onGoFolders: () -> Unit) {
             }
         }
         if (listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 0) {
-            TopFade(Modifier.align(Alignment.TopCenter), height = 30.dp)
+            TopFade(Modifier.align(Alignment.TopCenter), height = 16.dp)
         }
     }
     }
@@ -394,7 +395,7 @@ private fun Hero(items: List<ItemEntity>, onFocus: (Boolean) -> Unit) {
     val extra = extras[item.key]
     val backdrop = extra?.backdrop ?: item.backdrop
 
-    Box(Modifier.fillMaxWidth().height(330.dp).background(C.Bg)) {
+    Box(Modifier.fillMaxWidth().height(312.dp).background(C.Bg)) {
         // Imagen a la derecha, fundida con el fondo; al cambiar, fundido cruzado lento y un zoom muy suave
         androidx.compose.animation.AnimatedContent(
             targetState = safeIndex,
@@ -448,7 +449,7 @@ private fun Hero(items: List<ItemEntity>, onFocus: (Boolean) -> Unit) {
                 },
                 label = "heroInfo",
                 contentAlignment = Alignment.BottomStart,
-                modifier = Modifier.height(215.dp),   // altura fija: los botones no se mueven al cambiar
+                modifier = Modifier.height(200.dp),   // altura fija: los botones no se mueven al cambiar
             ) { i ->
                 val item = items[i % items.size]
                 val extra = extras[item.key]

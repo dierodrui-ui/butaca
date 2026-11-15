@@ -40,6 +40,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
@@ -163,15 +164,18 @@ fun ActionButton(
     modifier: Modifier = Modifier,
     primary: Boolean = false,
     height: Dp = 42.dp,
+    /** Color de estado (vista = verde, favorito = rojo, ver más adelante = amarillo). */
+    active: Color? = null,
 ) {
+    val onActive = if (active != null && active.luminance() > 0.5f) C.Bg else Color.White
     FocusSurface(
         onClick = onClick,
         modifier = modifier.height(height),
         radius = 12.dp,
-        container = if (primary) C.Text else C.Raised,
-        focusedContainer = if (primary) C.Text else C.Raised,
-        content = if (primary) C.Bg else C.Text,
-        focusedContent = if (primary) C.Bg else C.Text,
+        container = active?.copy(alpha = 0.22f) ?: if (primary) C.Text else C.Raised,
+        focusedContainer = active ?: if (primary) C.Text else C.Raised,
+        content = active ?: if (primary) C.Bg else C.Text,
+        focusedContent = if (active != null) onActive else if (primary) C.Bg else C.Text,
         focusedScale = 1.05f,
     ) {
         Row(
@@ -273,11 +277,15 @@ fun PosterCard(
             LocalTaste.current?.match(keySeed)?.let { m ->
                 MatchPill(m, Modifier.align(if (position == null) Alignment.TopStart else Alignment.TopEnd).padding(7.dp))
             }
-            if (watched) {
+            // Visto (check verde) o empezado (anillo: rojo < 10 %, amarillo 10-70 %, naranja > 70 %)
+            val frac = LocalProgress.current[keySeed]
+            if (watched || (frac != null && frac >= 1f)) {
                 Box(
                     Modifier.align(Alignment.BottomEnd).padding(7.dp).size(24.dp).clip(CircleShape).background(C.Green),
                     contentAlignment = Alignment.Center,
                 ) { Icon(Ic.Check, "Vista", tint = C.Bg, modifier = Modifier.size(15.dp)) }
+            } else if (frac != null && frac > 0f) {
+                ProgressDot(frac, Modifier.align(Alignment.BottomEnd).padding(7.dp))
             }
             // Favorito y Ver más adelante
             val marks = LocalMarks.current
@@ -292,7 +300,7 @@ fun PosterCard(
                     if (later) Box(
                         Modifier.size(24.dp).clip(CircleShape).background(Color(0xE607080C)),
                         contentAlignment = Alignment.Center,
-                    ) { Icon(Ic.Clock, "Ver más adelante", tint = C.Accent, modifier = Modifier.size(14.dp)) }
+                    ) { Icon(Ic.Clock, "Ver más adelante", tint = C.Gold, modifier = Modifier.size(14.dp)) }
                 }
             }
         }
@@ -529,4 +537,37 @@ fun BrandLogo(markSize: Dp, textSize: Int) {
         ),
         modifier = Modifier.height(markSize + 4.dp),
     )
+}
+
+/** Lo visto de cada título (0..1; 1 = completo), para las carátulas. */
+val LocalProgress = androidx.compose.runtime.staticCompositionLocalOf { emptyMap<String, Float>() }
+
+fun progressColor(f: Float): Color = when {
+    f >= 1f -> C.Green
+    f < 0.10f -> Color(0xFFE8344B)
+    f <= 0.70f -> Color(0xFFFFC24A)
+    else -> Color(0xFFFF8A3D)
+}
+
+/** Circulito con el anillo de lo que llevas visto. */
+@Composable
+fun ProgressDot(frac: Float, modifier: Modifier = Modifier, size: Dp = 24.dp) {
+    val col = progressColor(frac)
+    androidx.compose.foundation.Canvas(modifier.size(size)) {
+        drawCircle(Color(0xE607080C))
+        val stroke = this.size.minDimension * 0.16f
+        val inset = stroke / 2 + this.size.minDimension * 0.08f
+        drawArc(
+            Color(0x44FFFFFF), 0f, 360f, false,
+            topLeft = androidx.compose.ui.geometry.Offset(inset, inset),
+            size = androidx.compose.ui.geometry.Size(this.size.width - inset * 2, this.size.height - inset * 2),
+            style = androidx.compose.ui.graphics.drawscope.Stroke(stroke),
+        )
+        drawArc(
+            col, -90f, 360f * frac.coerceIn(0.04f, 1f), false,
+            topLeft = androidx.compose.ui.geometry.Offset(inset, inset),
+            size = androidx.compose.ui.geometry.Size(this.size.width - inset * 2, this.size.height - inset * 2),
+            style = androidx.compose.ui.graphics.drawscope.Stroke(stroke, cap = androidx.compose.ui.graphics.StrokeCap.Round),
+        )
+    }
 }

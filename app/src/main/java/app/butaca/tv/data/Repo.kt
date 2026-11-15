@@ -944,6 +944,9 @@ class Repo(
         Marks(l.filter { it.system == "fav" }.map { it.stableKey }.toSet(), l.filter { it.system == "later" }.map { it.stableKey }.toSet())
     }
 
+    /** Todo lo visto o empezado por este perfil. */
+    fun activity(): Flow<List<ActivityRow>> = user.progress().observeActivity()
+
     fun watchedKeys(): Flow<Set<String>> = user.progress().observeWatchedKeys().map { it.toSet() }
     fun progressOf(stableKey: String): Flow<ProgressEntity?> = user.progress().observe(stableKey)
     fun episodeProgress(seriesKey: String): Flow<List<EpisodeProgressEntity>> = user.progress().observeEpisodes(seriesKey)

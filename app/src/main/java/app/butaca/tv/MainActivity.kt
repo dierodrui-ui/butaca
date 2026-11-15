@@ -22,6 +22,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
 import androidx.navigation.NavType
+import kotlinx.coroutines.flow.map
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
@@ -181,11 +182,13 @@ fun ProfileRoot() {
 
     val marks by remember { ButacaApp.repo.marks() }.collectAsState(initial = app.butaca.tv.data.Marks())
     val taste by app.butaca.tv.data.Taste.model.collectAsState()
+    val progressMap by remember { repo.activity().map { l -> l.associate { it.stableKey to it.fraction } } }.collectAsState(initial = emptyMap())
     val rateAsk by app.butaca.tv.data.RatePrompt.request.collectAsState()
     val route = nav.currentBackStackEntryAsState().value?.destination?.route
     CompositionLocalProvider(
         LocalNav provides appNav, LocalDensity provides tvDensity, app.butaca.tv.ui.components.LocalMarks provides marks,
         app.butaca.tv.ui.components.LocalTaste provides taste,
+        app.butaca.tv.ui.components.LocalProgress provides progressMap,
     ) {
         Box(Modifier.fillMaxSize().background(C.Bg)) {
             NavHost(navController = nav, startDestination = start) {

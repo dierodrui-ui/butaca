@@ -59,6 +59,7 @@ import app.butaca.tv.ui.components.SectionTitle
 import app.butaca.tv.ui.components.T
 import app.butaca.tv.ui.components.TvRow
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
@@ -90,6 +91,11 @@ fun StatsScreen() {
     val history by remember { stats.observeHistory() }.collectAsState(initial = emptyList())
     val top by remember { stats.observeTop(15) }.collectAsState(initial = emptyList())
     val finished by remember { repo.user.progress().observeWatched() }.collectAsState(initial = emptyList())
+    val activity by remember { repo.activity() }.collectAsState(initial = emptyList())
+    val ratings by remember { repo.user.taste().observeAll() }.collectAsState(initial = emptyList())
+    val scores = remember(ratings) { ratings.associate { it.stableKey to it.score } }
+    var filter by remember { mutableStateOf(0) }   // 0 todas, 1 empezadas, 2 vistas, 3 sin valorar
+    var menuFor by remember { mutableStateOf<app.butaca.tv.data.ActivityRow?>(null) }
     val genres by produceState(emptyList<Pair<String, Long>>(), top) {
         val counts = HashMap<String, Long>()
         val items = repo.db.items().byStableKeys(top.map { it.stableKey }).associateBy { it.stableKey }
@@ -128,6 +134,45 @@ fun StatsScreen() {
                 StatCard("Viendo películas y series", durationLabel(totalWatch), "en total", Modifier.weight(1f))
                 StatCard("Esta semana", durationLabel(week), "hoy: " + durationLabel(today?.appMs ?: 0), Modifier.weight(1f))
                 StatCard("Títulos terminados", "${finished.size}", "películas y series", Modifier.weight(1f))
+            }
+        }
+        // Todo lo visto y empezado, con el % visto y tu nota
+        item(key = "seenTitle") {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                SectionTitle("Vistas y empezadas", extra = "${activity.size}")
+                T("Pulsa un título para valorarlo: tus notas enseñan a Butaca lo que te gusta.", size = 13, color = C.Muted)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    val started = activity.count { it.fraction < 1f }
+                    val seen = activity.count { it.fraction >= 1f }
+                    val unrated = activity.count { it.stableKey !in scores }
+                    listOf("Todas · ${activity.size}", "Empezadas · $started", "Vistas · $seen", "Sin valorar · $unrated").forEachIndexed { i, l ->
+                        app.butaca.tv.ui.components.Pill(l, filter == i, { filter = i }, small = true)
+                    }
+                }
+            }
+        }
+        val shownActivity = activity.filter {
+            when (filter) { 1 -> it.fraction < 1f; 2 -> it.fraction >= 1f; 3 -> it.stableKey !in scores; else -> true }
+        }
+        if (shownActivity.isEmpty()) item(key = "seenEmpty") { T("Aquí aparecerá todo lo que veas o marques como visto.", size = 14, color = C.Faint) }
+        shownActivity.chunked(7).forEachIndexed { r, row ->
+            item(key = "seenRow$r") {
+                Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    row.forEach { a ->
+                        Box(Modifier.weight(1f)) {
+                            val pct = (a.fraction * 100).toInt()
+                            val meta = listOfNotNull(
+                                if (a.fraction >= 1f) "Vista" else "$pct% visto",
+                                scores[a.stableKey]?.let { "★ $it" } ?: "Sin valorar",
+                            ).joinToString(" · ")
+                            PosterCard(
+                                title = a.title, icon = a.icon, keySeed = a.stableKey, meta = meta, width = null,
+                                isSeries = a.type == "series", onClick = { menuFor = a },
+                            )
+                        }
+                    }
+                    repeat(7 - row.size) { Spacer(Modifier.weight(1f)) }
+                }
             }
         }
         item(key = "chart") {
@@ -169,6 +214,7 @@ fun StatsScreen() {
                 }
             }
         }
+        item(key = "menuHost") { menuFor?.let { a -> ActivityMenu(a, scores[a.stableKey], onDismiss = { menuFor = null }) } }
         item(key = "histTitle") { SectionTitle("Historial", extra = if (history.isEmpty()) "todavía vacío" else null) }
         var lastDay = ""
         history.forEach { h ->
@@ -243,6 +289,35 @@ private fun HistoryRow(h: WatchLogEntity) {
             T(durationLabel(h.watchedMs), size = 14, weight = FontWeight.SemiBold, color = C.AccentSoft)
             T(SimpleDateFormat("HH:mm", Locale("es", "ES")).format(java.util.Date(h.lastAt)), size = 12, color = C.Faint)
         }
+    }
+}
+
+/** Qué hacer con un título de «Vistas y empezadas». */
+@Composable
+private fun ActivityMenu(a: app.butaca.tv.data.ActivityRow, score: Int?, onDismiss: () -> Unit) {
+    val repo = ButacaApp.repo
+    val nav = LocalNav.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    var rating by remember { mutableStateOf(false) }
+    val ref = ContentRef(a.stableKey, a.type, a.title, a.icon, null, null, null)
+    if (rating) { app.butaca.tv.ui.components.RatingDialog(ref, onDismiss = { rating = false; onDismiss() }); return }
+    app.butaca.tv.ui.components.AppDialog(onDismiss) {
+        T(a.title, size = 22, weight = FontWeight.Bold, maxLines = 2)
+        val pct = (a.fraction * 100).toInt()
+        T(
+            listOfNotNull(
+                if (a.fraction >= 1f) "Vista entera" else "$pct% visto",
+                if (a.type == "series" && a.season != null) "T${a.season} · E${a.episode}" else null,
+                score?.let { "Tu nota: $it" } ?: "Sin valorar",
+            ).joinToString(" · "),
+            size = 14, color = app.butaca.tv.ui.components.progressColor(a.fraction),
+        )
+        app.butaca.tv.ui.components.MenuRow(if (score != null) "Cambiar mi nota ($score)" else "Valorar del 1 al 10", app.butaca.tv.ui.Ic.Star, onClick = { rating = true })
+        app.butaca.tv.ui.components.MenuRow("Ver ficha", app.butaca.tv.ui.Ic.Info, onClick = { onDismiss(); nav.openRef(ref) })
+        if (a.fraction < 1f) app.butaca.tv.ui.components.MenuRow("Marcar como vista", app.butaca.tv.ui.Ic.Check, onClick = {
+            scope.launch { repo.markWatched(ref, true) }; rating = true
+        })
+        else app.butaca.tv.ui.components.MenuRow("Quitar de vistas", app.butaca.tv.ui.Ic.Close, onClick = { scope.launch { repo.markWatched(ref, false) }; onDismiss() })
     }
 }
 

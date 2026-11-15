@@ -158,6 +158,7 @@ private fun SecondaryActions(item: ItemEntity, onPicker: () -> Unit) {
         ActionButton(
             if (inLater) "En tu lista" else "Ver más adelante", if (inLater) Ic.Check else Ic.Clock,
             onClick = { scope.launch { repo.toggleFolder(laterId, ref, inLater) } },
+            active = if (inLater) C.Gold else null,
         )
     }
     ActionButton("Añadir a carpeta", Ic.FolderPlus, onClick = onPicker)
@@ -165,11 +166,12 @@ private fun SecondaryActions(item: ItemEntity, onPicker: () -> Unit) {
         ActionButton(
             if (inFav) "En favoritos" else "Favorito", if (inFav) Ic.HeartFilled else Ic.Heart,
             onClick = { scope.launch { repo.toggleFolder(favId, ref, inFav) } },
+            active = if (inFav) C.Accent else null,
         )
     }
     var rating by remember { mutableStateOf(false) }
     ActionButton(
-        if (watched) "Vista" else "Marcar vista", Ic.Check,
+        if (watched) "Vista" else "Marcar vista", Ic.Check, active = if (watched) C.Green else null,
         onClick = {
             scope.launch { repo.markWatched(ref, !watched) }
             if (!watched) rating = true   // y, ya que la has visto, ¿qué te pareció?
