@@ -540,20 +540,27 @@ class Repo(
                 .sortedByDescending { t -> t.genreIds.count { it in genreIds } * 1000 + t.popularity }
             val styleItems = matchTitles(pool, item.stableKey)
 
-            // Lo que sale en saga, director o reparto no se repite en «mismo estilo»
+            // Estudio o cadena: probamos con los principales hasta encontrar alguno con títulos en tu servidor
+            var studio: Pair<String, List<ItemEntity>>? = null
+            for (st in tmdb.studios(d, isTv).take(3)) {
+                val found = matchTitles(tmdb.byStudio(isTv, st), item.stableKey)
+                if (found.size >= 2) { studio = ("Más de " + st.name) to found; break }
+            }
+
+            // Orden de prioridad: director, saga, estudio, mismo estilo y reparto.
+            // Un título solo aparece en la primera fila que le toca.
             val claimed = HashSet<String>()
             val rows = ArrayList<RelatedRow>()
-            val later = ArrayList<RelatedRow>()
-            listOfNotNull(saga, director).plus(cast).forEach { (title, list) ->
-                val fresh = list.filter { it.stableKey !in claimed }.take(15)
-                if (fresh.isNotEmpty()) { later += RelatedRow(title, fresh); fresh.forEach { claimed += it.stableKey } }
+            fun add(title: String, list: List<ItemEntity>, max: Int = 15) {
+                val fresh = list.filter { it.stableKey !in claimed }.take(max)
+                if (fresh.isNotEmpty()) { rows += RelatedRow(title, fresh); fresh.forEach { claimed += it.stableKey } }
             }
-            val style = styleItems.filter { it.stableKey !in claimed }.take(18)
-            if (style.isNotEmpty()) {
-                val label = genres.take(3).joinToString(", ") { it.second }
-                rows += RelatedRow(if (label.isBlank()) "Del mismo estilo" else "Del mismo estilo · $label", style)
-            }
-            rows += later
+            director?.let { add(it.first, it.second) }
+            saga?.let { add(it.first, it.second) }
+            studio?.let { add(it.first, it.second) }
+            val label = genres.take(3).joinToString(", ") { it.second }
+            add(if (label.isBlank()) "Del mismo estilo" else "Del mismo estilo · $label", styleItems, 18)
+            cast.forEach { add(it.first, it.second) }
             rows
         } catch (e: Exception) {
             tmdb.lastError = e.message ?: e.javaClass.simpleName

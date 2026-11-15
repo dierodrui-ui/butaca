@@ -181,6 +181,41 @@ class TmdbClient(
         return out
     }
 
+    /**
+     * Estudios/productoras del título (en series, primero la cadena o plataforma).
+     * El primero que da TMDB suele ser el principal (Pixar, Warner Bros., Universal…).
+     */
+    fun studios(d: JSONObject, isTv: Boolean): List<Studio> {
+        val out = ArrayList<Studio>()
+        if (isTv) d.optJSONArray("networks")?.let { arr ->
+            (0 until arr.length()).mapNotNull { arr.optJSONObject(it) }.forEach { out += Studio(it.optInt("id"), it.optString("name"), true) }
+        }
+        d.optJSONArray("production_companies")?.let { arr ->
+            (0 until arr.length()).mapNotNull { arr.optJSONObject(it) }
+                // las que tienen logo suelen ser los estudios principales
+                .sortedByDescending { if (it.optString("logo_path").isNotBlank()) 1 else 0 }
+                .forEach { out += Studio(it.optInt("id"), it.optString("name"), false) }
+        }
+        return out.filter { it.id > 0 && it.name.isNotBlank() }.distinctBy { it.id to it.isNetwork }
+    }
+
+    data class Studio(val id: Int, val name: String, val isNetwork: Boolean)
+
+    /** Lo más visto de un estudio o cadena. */
+    suspend fun byStudio(isTv: Boolean, studio: Studio, pages: Int = 4): List<TmdbTitle> {
+        val path = if (isTv) "/discover/tv" else "/discover/movie"
+        val filter = if (studio.isNetwork) "with_networks" else "with_companies"
+        val out = ArrayList<TmdbTitle>()
+        for (p in 1..pages) {
+            val res = get(path, mapOf(
+                "language" to "es-ES", filter to studio.id.toString(),
+                "sort_by" to "vote_count.desc", "page" to p.toString(),
+            ))?.optJSONArray("results") ?: break
+            out += parseList(res, isTv)
+        }
+        return out
+    }
+
     fun recommendations(d: JSONObject, isTv: Boolean): List<TmdbTitle> =
         parseList(d.optJSONObject("recommendations")?.optJSONArray("results"), isTv) +
             parseList(d.optJSONObject("similar")?.optJSONArray("results"), isTv)
