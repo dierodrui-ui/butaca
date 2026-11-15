@@ -52,6 +52,12 @@ val Jakarta = androidx.compose.ui.text.font.FontFamily(
     androidx.compose.ui.text.font.Font(app.butaca.tv.R.font.jakarta_extrabold, androidx.compose.ui.text.font.FontWeight.ExtraBold),
 )
 
+/** Letra del logo (BUTACA): condensada y rotunda, como los carteles de cine. */
+val Bebas = androidx.compose.ui.text.font.FontFamily(androidx.compose.ui.text.font.Font(app.butaca.tv.R.font.bebas_neue))
+
+/** Rojo del logo, de más claro arriba a más intenso abajo. */
+val LogoBrush = androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color(0xFFFF2E45), Color(0xFFC8102E)))
+
 private fun butacaTypography(): androidx.tv.material3.Typography {
     val b = androidx.tv.material3.Typography()
     fun androidx.compose.ui.text.TextStyle.j() = copy(fontFamily = Jakarta)

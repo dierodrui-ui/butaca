@@ -26,6 +26,12 @@ import app.butaca.tv.data.RelatedRow
 import app.butaca.tv.data.TmdbTitle
 import app.butaca.tv.data.AlertEntity
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.togetherWith
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -355,10 +361,24 @@ private fun Hero(items: List<ItemEntity>, onFocus: (Boolean) -> Unit) {
 
     LaunchedEffect(Unit) { delay(300); requestFocusSafely(firstBtn) }
 
-    LaunchedEffect(items.size, focused) {
-        if (!focused && items.size > 1) while (true) {
-            delay(8000)
-            index = (index + 1) % items.size
+    // Pasa solo cada 10 s (también con el foco puesto). Si usas el mando, vuelve a empezar a contar.
+    val progress = remember { Animatable(0f) }
+    var nudge by remember { mutableIntStateOf(0) }
+    LaunchedEffect(items.size, safeIndex, nudge) {
+        progress.snapTo(0f)
+        if (items.size > 1) {
+            progress.animateTo(1f, tween(10_000, easing = LinearEasing))
+            index = (safeIndex + 1) % items.size
+        }
+    }
+    // Precarga del fondo y logo del siguiente, para que el cambio sea limpio
+    LaunchedEffect(safeIndex, items.size) {
+        if (items.size > 1) {
+            val next = items[(safeIndex + 1) % items.size]
+            if (extras[next.key] == null) {
+                val e = try { repo.heroExtra(next) } catch (_: Exception) { null }
+                if (e != null && extras[next.key] == null) extras[next.key] = HeroData(e.backdrop ?: next.backdrop, e.plot ?: next.plot, e.genres ?: next.genre, e.logo, e.trailer)
+            }
         }
     }
 
@@ -381,62 +401,95 @@ private fun Hero(items: List<ItemEntity>, onFocus: (Boolean) -> Unit) {
     val backdrop = extra?.backdrop ?: item.backdrop
 
     Box(Modifier.fillMaxWidth().height(350.dp).background(C.Bg)) {
-        // Imagen a la derecha, fundida con el fondo por la izquierda y por abajo
-        if (backdrop != null) {
-            AsyncImage(
-                backdrop, null, contentScale = ContentScale.Crop, alignment = Alignment.TopCenter,
-                modifier = Modifier.align(Alignment.TopEnd).fillMaxHeight().fillMaxWidth(0.74f),
-            )
-        } else {
-            Box(Modifier.align(Alignment.TopEnd).fillMaxHeight().fillMaxWidth(0.74f).background(C.toneFor(item.stableKey))) {
-                Box(
-                    Modifier.align(Alignment.Center).padding(start = 160.dp).height(250.dp).aspectRatio(2f / 3f)
-                        .clip(RoundedCornerShape(12.dp))
-                ) { Artwork(item.icon, item.name, item.stableKey, Modifier.fillMaxSize()) }
+        // Imagen a la derecha, fundida con el fondo; al cambiar, fundido cruzado lento y un zoom muy suave
+        androidx.compose.animation.AnimatedContent(
+            targetState = safeIndex,
+            transitionSpec = {
+                androidx.compose.animation.fadeIn(tween(1200, easing = androidx.compose.animation.core.FastOutSlowInEasing)) togetherWith
+                    androidx.compose.animation.fadeOut(tween(1200, delayMillis = 150))
+            },
+            modifier = Modifier.align(Alignment.TopEnd).fillMaxHeight().fillMaxWidth(0.74f),
+            label = "heroBackdrop",
+        ) { i ->
+            val it2 = items[i % items.size]
+            val bd = extras[it2.key]?.backdrop ?: it2.backdrop
+            val zoom = remember { Animatable(1.0f) }
+            LaunchedEffect(Unit) { zoom.animateTo(1.08f, tween(12_000, easing = LinearEasing)) }
+            Box(Modifier.fillMaxSize().clipToBounds()) {
+                if (bd != null) {
+                    AsyncImage(
+                        bd, null, contentScale = ContentScale.Crop, alignment = Alignment.TopCenter,
+                        modifier = Modifier.fillMaxSize().graphicsLayer { scaleX = zoom.value; scaleY = zoom.value },
+                    )
+                } else {
+                    Box(Modifier.fillMaxSize().background(C.toneFor(it2.stableKey))) {
+                        Box(
+                            Modifier.align(Alignment.Center).padding(start = 160.dp).height(250.dp).aspectRatio(2f / 3f)
+                                .clip(RoundedCornerShape(12.dp))
+                        ) { Artwork(it2.icon, it2.name, it2.stableKey, Modifier.fillMaxSize()) }
+                    }
+                }
             }
         }
         Box(
             Modifier.fillMaxSize().background(
-                Brush.horizontalGradient(0f to C.Bg, 0.30f to C.Bg, 0.55f to Color(0xB30D1015), 0.8f to Color(0x330D1015), 1f to Color(0x000D1015))
+                Brush.horizontalGradient(0f to C.Bg, 0.30f to C.Bg, 0.55f to Color(0xB307080C), 0.8f to Color(0x3307080C), 1f to Color(0x0007080C))
             )
         )
         Box(
             Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(120.dp)
-                .background(Brush.verticalGradient(0f to Color(0x000D1015), 1f to C.Bg))
+                .background(Brush.verticalGradient(0f to Color(0x0007080C), 1f to C.Bg))
         )
 
         Column(
             Modifier.align(Alignment.CenterStart).padding(start = SidePad + 4.dp, top = 10.dp).width(540.dp),
             verticalArrangement = Arrangement.spacedBy(9.dp),
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Badge("NUEVO EN TU SERVIDOR", accent = true)
-                val kind = if (item.type == ContentType.SERIES) "Serie" else "Película"
-                T("${addedLabel(item.added)} · $kind", size = 12, weight = FontWeight.SemiBold, color = C.TextSoft)
+            androidx.compose.animation.AnimatedContent(
+                targetState = safeIndex,
+                transitionSpec = {
+                    (androidx.compose.animation.fadeIn(tween(700, delayMillis = 350)) +
+                        androidx.compose.animation.slideInVertically(tween(800, delayMillis = 350, easing = androidx.compose.animation.core.FastOutSlowInEasing)) { it / 10 }) togetherWith
+                        androidx.compose.animation.fadeOut(tween(350))
+                },
+                label = "heroInfo",
+                contentAlignment = Alignment.BottomStart,
+                modifier = Modifier.height(215.dp),   // altura fija: los botones no se mueven al cambiar
+            ) { i ->
+                val item = items[i % items.size]
+                val extra = extras[item.key]
+                Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Badge("NUEVO EN TU SERVIDOR", accent = true)
+                        val kind = if (item.type == ContentType.SERIES) "Serie" else "Película"
+                        T("${addedLabel(item.added)} · $kind", size = 12, weight = FontWeight.SemiBold, color = C.TextSoft)
+                    }
+                    val logo = extra?.logo
+                    if (logo != null) {
+                        AsyncImage(
+                            logo, item.name, contentScale = ContentScale.Fit, alignment = Alignment.CenterStart,
+                            modifier = Modifier.heightIn(max = 96.dp).widthIn(max = 380.dp).padding(vertical = 4.dp),
+                        )
+                    } else {
+                        T(item.name, size = 34, weight = FontWeight.Bold, maxLines = 2, lineHeight = 38, color = Color.White)
+                    }
+                    val meta = listOfNotNull(
+                        item.year?.toString(),
+                        (extra?.genre ?: item.genre)?.split(',')?.take(3)?.joinToString(", ") { it.trim() },
+                        item.cert?.let { if (it == 0) "TP" else "+$it" },
+                        item.rating?.let { "★ " + String.format("%.1f", it).replace('.', ',') },
+                    ).joinToString(" · ")
+                    if (meta.isNotBlank()) T(meta, size = 14, color = C.TextSoft)
+                    val plot = extra?.plot ?: item.plot
+                    if (!plot.isNullOrBlank()) T(plot, size = 14, color = Color(0xFFC9CFD8), maxLines = 3, lineHeight = 20)
+                }
             }
-            val logo = extra?.logo
-            if (logo != null) {
-                AsyncImage(
-                    logo, item.name, contentScale = ContentScale.Fit, alignment = Alignment.CenterStart,
-                    modifier = Modifier.heightIn(max = 96.dp).widthIn(max = 380.dp).padding(vertical = 4.dp),
-                )
-            } else {
-                T(item.name, size = 34, weight = FontWeight.Bold, maxLines = 2, lineHeight = 38, color = Color.White)
-            }
-            val meta = listOfNotNull(
-                item.year?.toString(),
-                (extra?.genre ?: item.genre)?.split(',')?.take(3)?.joinToString(", ") { it.trim() },
-                item.cert?.let { if (it == 0) "TP" else "+$it" },
-                item.rating?.let { "★ " + String.format("%.1f", it).replace('.', ',') },
-            ).joinToString(" · ")
-            if (meta.isNotBlank()) T(meta, size = 14, color = C.TextSoft)
-            val plot = extra?.plot ?: item.plot
-            if (!plot.isNullOrBlank()) T(plot, size = 14, color = Color(0xFFC9CFD8), maxLines = 3, lineHeight = 20)
             Row(
                 Modifier
                     .padding(top = 6.dp)
                     .onFocusChanged { focused = it.hasFocus; onFocus(it.hasFocus) }
                     .onPreviewKeyEvent { e ->
+                        if (e.type == KeyEventType.KeyDown) nudge++
                         if (e.type != KeyEventType.KeyDown || items.size < 2) return@onPreviewKeyEvent false
                         when {
                             e.key == Key.DirectionRight && focusedBtn == (if (extra?.trailer != null) 2 else 1) -> { index = (safeIndex + 1) % items.size; true }
@@ -475,10 +528,13 @@ private fun Hero(items: List<ItemEntity>, onFocus: (Boolean) -> Unit) {
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     items.indices.forEach { i ->
-                        Box(
-                            Modifier.height(6.dp).width(if (i == safeIndex) 22.dp else 6.dp).clip(RoundedCornerShape(999.dp))
-                                .background(if (i == safeIndex) C.Accent else Color(0x66F2F4F7))
-                        )
+                        if (i == safeIndex) {
+                            Box(Modifier.height(4.dp).width(30.dp).clip(RoundedCornerShape(999.dp)).background(Color(0x40F4F5F8))) {
+                                Box(Modifier.fillMaxHeight().fillMaxWidth(progress.value.coerceIn(0.02f, 1f)).background(C.Accent))
+                            }
+                        } else {
+                            Box(Modifier.height(4.dp).width(8.dp).clip(RoundedCornerShape(999.dp)).background(Color(0x55F4F5F8)))
+                        }
                     }
                     T("   ◀ ▶ más novedades", size = 11, color = C.Muted)
                 }

@@ -218,7 +218,7 @@ fun Badge(text: String, modifier: Modifier = Modifier, accent: Boolean = false) 
     Box(
         modifier
             .clip(RoundedCornerShape(6.dp))
-            .background(if (accent) C.Accent else Color(0xD10D1015))
+            .background(if (accent) C.Accent else Color(0xD107080C))
             .padding(horizontal = 7.dp, vertical = 3.dp)
     ) {
         T(text, size = 10, weight = FontWeight.Bold, color = if (accent) C.OnAccent else C.Text)
@@ -258,7 +258,7 @@ fun PosterCard(
             Artwork(icon, title, keySeed, Modifier.fillMaxSize().alpha(if (unavailable) 0.4f else 1f))
             if (position != null) {
                 Box(
-                    Modifier.align(Alignment.TopStart).padding(7.dp).size(24.dp).clip(CircleShape).background(Color(0xD10D1015)),
+                    Modifier.align(Alignment.TopStart).padding(7.dp).size(24.dp).clip(CircleShape).background(Color(0xD107080C)),
                     contentAlignment = Alignment.Center,
                 ) { T("$position", size = 12, weight = FontWeight.SemiBold) }
             }
@@ -276,11 +276,11 @@ fun PosterCard(
             if (fav || later) {
                 Row(Modifier.align(Alignment.BottomStart).padding(7.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     if (fav) Box(
-                        Modifier.size(24.dp).clip(CircleShape).background(Color(0xE60D1015)),
+                        Modifier.size(24.dp).clip(CircleShape).background(Color(0xE607080C)),
                         contentAlignment = Alignment.Center,
                     ) { Icon(Ic.HeartFilled, "Favorito", tint = C.Red, modifier = Modifier.size(14.dp)) }
                     if (later) Box(
-                        Modifier.size(24.dp).clip(CircleShape).background(Color(0xE60D1015)),
+                        Modifier.size(24.dp).clip(CircleShape).background(Color(0xE607080C)),
                         contentAlignment = Alignment.Center,
                     ) { Icon(Ic.Clock, "Ver más adelante", tint = C.Gold, modifier = Modifier.size(14.dp)) }
                 }
@@ -317,7 +317,7 @@ fun WideCard(
         ) {
             Artwork(image, title, keySeed, Modifier.fillMaxSize(), titleSize = 16)
             Box(
-                Modifier.align(Alignment.Center).size(42.dp).clip(CircleShape).background(Color(0x8C0D1015)),
+                Modifier.align(Alignment.Center).size(42.dp).clip(CircleShape).background(Color(0x8C07080C)),
                 contentAlignment = Alignment.Center,
             ) { Icon(Ic.Play, null, tint = C.Text, modifier = Modifier.size(18.dp)) }
             if (badge != null) Badge(badge, Modifier.align(Alignment.TopStart).padding(10.dp), accent = true)
@@ -432,7 +432,7 @@ fun Scrim(modifier: Modifier = Modifier) {
     Box(
         modifier.background(
             Brush.horizontalGradient(
-                0f to Color(0xF20D1015), 0.45f to Color(0xB30D1015), 1f to Color(0x000D1015),
+                0f to Color(0xF207080C), 0.45f to Color(0xB307080C), 1f to Color(0x0007080C),
             )
         )
     )
@@ -440,7 +440,7 @@ fun Scrim(modifier: Modifier = Modifier) {
 
 @Composable
 fun BottomFade(modifier: Modifier = Modifier) {
-    Box(modifier.background(Brush.verticalGradient(0f to Color(0x000D1015), 1f to C.Bg)))
+    Box(modifier.background(Brush.verticalGradient(0f to Color(0x0007080C), 1f to C.Bg)))
 }
 
 /** «Comedia · ★ 7,3» bajo la carátula. */
@@ -505,20 +505,18 @@ fun TvRow(modifier: Modifier = Modifier, gap: Dp = 18.dp, content: LazyListScope
 /** Degradado arriba para que lo que se sale por arriba no se vea cortado de golpe. */
 @Composable
 fun TopFade(modifier: Modifier = Modifier, height: Dp = 48.dp) {
-    Box(modifier.fillMaxWidth().height(height).background(Brush.verticalGradient(0f to C.Bg, 1f to Color(0x000D1015))))
+    Box(modifier.fillMaxWidth().height(height).background(Brush.verticalGradient(0f to C.Bg, 1f to Color(0x0007080C))))
 }
 
-/** Logo de Butaca: la butaca sobre el cuadrado rojo y el nombre. */
+/** Logo de Butaca: el nombre en rojo, con la letra de cartel de cine. */
 @Composable
 fun BrandLogo(markSize: Dp, textSize: Int) {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        androidx.compose.foundation.Image(
-            androidx.compose.ui.res.painterResource(app.butaca.tv.R.drawable.logo_mark), contentDescription = "Butaca",
-            modifier = Modifier.size(markSize),
-        )
-        Text(
-            "Butaca", fontFamily = app.butaca.tv.ui.Jakarta, fontWeight = FontWeight.ExtraBold,
-            fontSize = textSize.sp, letterSpacing = (-0.4).sp, color = C.Text,
-        )
-    }
+    Text(
+        "BUTACA",
+        style = androidx.compose.ui.text.TextStyle(
+            brush = app.butaca.tv.ui.LogoBrush, fontFamily = app.butaca.tv.ui.Bebas,
+            fontSize = (textSize * 1.55f).sp, letterSpacing = 1.2.sp,
+        ),
+        modifier = Modifier.height(markSize + 4.dp),
+    )
 }

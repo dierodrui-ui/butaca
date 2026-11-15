@@ -124,18 +124,20 @@ fun IntroScreen(onDone: () -> Unit) {
             if (flash.value > 0f) drawRect(Color.White.copy(alpha = 0.55f * flash.value * flash.value))
         }
         // Logo y nombre
-        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(22.dp)) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
             val l = logo.value
             Image(
-                painterResource(R.drawable.logo_mark), contentDescription = null,
-                modifier = Modifier.size(150.dp).scale(1.35f - 0.35f * l).alpha(l.coerceIn(0f, 1f))
+                painterResource(R.drawable.logo_b), contentDescription = null,
+                modifier = Modifier.size(190.dp).scale(1.35f - 0.35f * l).alpha(l.coerceIn(0f, 1f))
                     .graphicsLayer { rotationX = (1f - l) * 18f; cameraDistance = 14f * density },
             )
             val wv = word.value
             Text(
-                "Butaca",
-                fontFamily = Jakarta, fontWeight = FontWeight.ExtraBold, fontSize = 64.sp,
-                letterSpacing = (22f * (1f - wv) - 1f).sp, color = Color(0xFFD9DCE3),
+                "BUTACA",
+                style = androidx.compose.ui.text.TextStyle(
+                    brush = app.butaca.tv.ui.LogoBrush, fontFamily = app.butaca.tv.ui.Bebas, fontSize = 96.sp,
+                    letterSpacing = (30f * (1f - wv) + 3f).sp,
+                ),
                 modifier = Modifier.alpha(wv)
                     .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
                     .drawWithContent {
