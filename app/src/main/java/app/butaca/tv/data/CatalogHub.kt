@@ -49,7 +49,8 @@ suspend fun Repo.movieHub(force: Boolean = false): Hub {
     fun has(i: ItemEntity, vararg ids: Int) = ids.any { id -> names[id]?.let { TextUtil.norm(it) in genreSets[i.key].orEmpty() } == true }
 
     val rows = ArrayList<HubRow>()
-    fun add(id: String, title: String, list: List<ItemEntity>, numbered: Boolean = false, min: Int = 3) {
+    fun add(id: String, title: String, raw: List<ItemEntity>, numbered: Boolean = false, min: Int = 3) {
+        val list = raw.noRepeats()
         if (list.size >= min) rows += HubRow(id, title, list, numbered)
     }
     fun genre(id: String, title: String, vararg g: Int) = add(id, title, all.filter { has(it, *g) })

@@ -26,6 +26,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.lazy.items
+import androidx.compose.ui.focus.focusRestorer
+import app.butaca.tv.ui.Ic
+import app.butaca.tv.ui.components.MenuRow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -72,6 +80,7 @@ fun MoviesScreen() {
     }
 }
 
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 private fun MovieHubView(onServer: () -> Unit) {
     val repo = ButacaApp.repo
@@ -85,73 +94,90 @@ private fun MovieHubView(onServer: () -> Unit) {
     val hub by produceState<Hub?>(HubCache.hub, settings.kidsLimit, settings.tmdbKey, tick) {
         value = try { repo.movieHub() } catch (_: Exception) { value }
     }
-
-    PivotScope(pivot = 56.dp) {
-        LazyColumn(
-            Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(top = 18.dp, bottom = 90.dp),
-            verticalArrangement = Arrangement.spacedBy(20.dp),
-        ) {
-            item(key = "head") {
-                Column(Modifier.padding(horizontal = Side), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                        T("Películas", size = 26, weight = FontWeight.SemiBold)
-                        Pill("Por categorías de TMDB", true, { }, small = true)
-                        Pill("Categorías del servidor", false, onServer, small = true)
-                    }
-                    val h = hub
-                    val p = prep
-                    when {
-                        !repo.tmdb.enabled -> T("Añade tu clave de TMDB en Ajustes para ordenar el catálogo por categorías.", size = 13, color = C.Muted)
-                        p != null -> T("Clasificando tu catálogo con TMDB… ${p.first} de ${p.second}. Las filas se irán completando solas.", size = 13, color = C.Accent)
-                        h != null -> T("${h.identified} películas clasificadas con TMDB" + (if (h.unclassified > 0) " · ${h.unclassified} sin identificar (en «Categorías del servidor»)" else ""), size = 13, color = C.Muted)
-                    }
-                }
-            }
-            val h = hub
-            if (h == null) {
-                item(key = "loading") { T("Preparando las filas…", size = 14, color = C.Muted, modifier = Modifier.padding(horizontal = Side)) }
-            } else if (h.rows.isEmpty() && repo.tmdb.enabled) {
-                item(key = "empty") { EmptyState("Todavía no hay películas clasificadas", "En unos minutos aparecerán aquí, ordenadas por categorías.") }
-            }
-            h?.rows?.forEach { row ->
-                item(key = "row_" + row.id) { HubRowView(row, watched, onSeeAll = { nav.openHubRow(row.id) }) }
-            }
+    val rows = hub?.rows.orEmpty()
+    var selected by rememberSaveable { mutableStateOf("") }
+    var pendingFocus by remember { mutableStateOf("") }
+    LaunchedEffect(pendingFocus) { if (pendingFocus.isNotEmpty()) { delay(220); selected = pendingFocus } }
+    val row = rows.firstOrNull { it.id == selected } ?: rows.firstOrNull()
+    var sort by rememberSaveable { mutableStateOf(0) }   // 0 populares, 1 nota, 2 más recientes, 3 A-Z
+    val list: List<ItemEntity> = remember(row, sort) {
+        val l = row?.all.orEmpty()
+        if (row?.numbered == true) l else when (sort) {
+            1 -> l.sortedByDescending { it.rating ?: 0.0 }
+            2 -> l.sortedByDescending { it.year ?: 0 }
+            3 -> l.sortedBy { it.normName }
+            else -> l
         }
     }
-}
 
-@Composable
-private fun HubRowView(row: HubRow, watched: Set<String>, onSeeAll: () -> Unit) {
-    val nav = LocalNav.current
-    val repo = ButacaApp.repo
-    val shown = row.all.take(if (row.numbered) 10 else 30)
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        SectionTitle(row.title, Modifier.padding(horizontal = Side), extra = if (row.numbered) null else "${row.all.size}")
-        Box(Modifier.padding(start = Side - 6.dp)) {
-            TvRow {
-                itemsIndexed(shown, key = { _, it -> it.key }) { i, item ->
-                    LaunchedEffect(item.key) { repo.requestGenre(item) }
-                    PosterCard(
-                        title = item.name, icon = item.icon, keySeed = item.stableKey,
-                        meta = itemMeta(item), watched = item.stableKey in watched,
-                        position = if (row.numbered) i + 1 else null,
-                        onClick = { nav.openItem(item) },
-                        onLongClick = { nav.showMenu(MenuRequest(item.toRef())) },
-                    )
+    Column(Modifier.fillMaxSize()) {
+        Row(Modifier.padding(start = 24.dp, top = 14.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Pill("Por categorías de TMDB", true, { }, small = true)
+            Pill("Categorías del servidor", false, onServer, small = true)
+        }
+        Row(Modifier.weight(1f).fillMaxWidth()) {
+            // ---------- Categorías de TMDB ----------
+            Column(Modifier.width(250.dp).fillMaxHeight().background(C.Panel).padding(top = 24.dp, start = 12.dp, end = 12.dp)) {
+                T("Películas", size = 22, weight = FontWeight.SemiBold, modifier = Modifier.padding(start = 12.dp, bottom = 12.dp))
+                LazyColumn(
+                    Modifier.weight(1f).focusRestorer(),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                    contentPadding = PaddingValues(bottom = 30.dp),
+                ) {
+                    items(rows, key = { it.id }) { r ->
+                        MenuRow(
+                            r.title, if (r.id == "foryou") Ic.Heart else if (r.numbered) Ic.Star else null,
+                            onClick = { selected = r.id },
+                            selected = row?.id == r.id,
+                            iconTint = if (row?.id == r.id) C.Accent else C.Muted,
+                            modifier = Modifier.onFocusChanged { if (it.isFocused) pendingFocus = r.id },
+                        )
+                    }
                 }
-                if (row.all.size > shown.size) {
-                    item(key = "more") {
-                        FocusSurface(
-                            onClick = onSeeAll,
-                            modifier = Modifier.width(116.dp).aspectRatio(2f / 3f),
-                            radius = 10.dp, container = C.Raised, focusedContainer = C.Accent,
-                            content = C.Text, focusedContent = C.OnAccent, focusedScale = 1.07f,
-                        ) {
-                            Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                T("Ver todo", size = 15, weight = FontWeight.SemiBold, color = Color.Unspecified)
-                                T("${row.all.size}", size = 12, color = Color.Unspecified)
-                            }
+            }
+            // ---------- Contenido ----------
+            Column(Modifier.weight(1f).fillMaxHeight().padding(start = 28.dp, end = 28.dp, top = 24.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                ) {
+                    T(row?.title ?: "Películas", size = 22, weight = FontWeight.SemiBold, maxLines = 1, modifier = Modifier.weight(1f, fill = false))
+                    if (row != null) T(if (list.size == 1) "1 título" else "${list.size} títulos", size = 13, color = C.Muted, maxLines = 1)
+                }
+                val h = hub
+                val p = prep
+                when {
+                    !repo.tmdb.enabled -> T("Añade tu clave de TMDB en Ajustes para ordenar el catálogo por categorías.", size = 13, color = C.Muted)
+                    p != null -> T("Clasificando tu catálogo con TMDB… ${p.first} de ${p.second}. Las categorías se irán completando solas.", size = 13, color = C.Accent)
+                    h != null && h.unclassified > 0 -> T("${h.unclassified} películas sin identificar en TMDB: están en «Categorías del servidor».", size = 12, color = C.Faint)
+                }
+                if (row != null && !row.numbered) {
+                    Row(Modifier.padding(top = 8.dp, bottom = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf("Más populares", "Mejor nota", "Más recientes", "A-Z").forEachIndexed { i, s ->
+                            Pill(s, sort == i, { sort = i }, small = true)
+                        }
+                    }
+                }
+                when {
+                    hub == null -> T("Preparando las categorías…", size = 14, color = C.Muted, modifier = Modifier.padding(top = 12.dp))
+                    rows.isEmpty() -> EmptyState("Todavía no hay películas clasificadas", "En unos minutos aparecerán aquí, ordenadas por categorías.")
+                    else -> LazyVerticalGrid(
+                        columns = GridCells.Adaptive(104.dp),
+                        modifier = Modifier.fillMaxSize().focusRestorer(),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp),
+                        contentPadding = PaddingValues(bottom = 40.dp, top = 6.dp, start = 6.dp, end = 6.dp),
+                    ) {
+                        items(list.size, key = { list[it].key }) { i ->
+                            val item = list[i]
+                            PosterCard(
+                                title = item.name, icon = item.icon, keySeed = item.stableKey, width = null,
+                                meta = itemMeta(item), watched = item.stableKey in watched,
+                                position = if (row?.numbered == true) i + 1 else null,
+                                onClick = { nav.openItem(item) },
+                                onLongClick = { nav.showMenu(MenuRequest(item.toRef())) },
+                            )
                         }
                     }
                 }

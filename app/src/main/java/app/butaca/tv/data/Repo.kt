@@ -400,7 +400,14 @@ class Repo(
             if (type == ContentType.LIVE) { e: ItemEntity -> e.baseKey } else { e: ItemEntity -> e.stableKey }
         val groups = LinkedHashMap<String, MutableList<ItemEntity>>()
         list.forEach { groups.getOrPut(groupKey(it)) { mutableListOf() }.add(it) }
-        return groups.values.map { g -> pickBest(g, max) }
+        if (type == ContentType.LIVE) return groups.values.map { g -> pickBest(g, max) }
+        // La misma película con distinto nombre en el servidor: si TMDB dice que es la misma, una sola carátula
+        val byTmdb = LinkedHashMap<String, MutableList<ItemEntity>>()
+        groups.values.forEach { g ->
+            val id = g.firstNotNullOfOrNull { it.tmdbId }
+            byTmdb.getOrPut(if (id != null) "t$id" else "k" + g.first().stableKey) { mutableListOf() }.addAll(g)
+        }
+        return byTmdb.values.map { g -> pickBest(g, max) }
     }
 
     private fun pickBest(group: List<ItemEntity>, max: Int): ItemEntity =
@@ -594,7 +601,9 @@ class Repo(
             val best = hit.filter { it.quality <= max }.maxByOrNull { it.quality } ?: hit.first()
             if (kidsOk(best)) out.putIfAbsent(best.stableKey, best)
         }
-        return out.values.toList()
+        // Sin repetidos: la misma película de TMDB solo una vez
+        val seen = HashSet<Int>()
+        return out.values.filter { it.tmdbId == null || seen.add(it.tmdbId) }
     }
 
     suspend fun related(item: ItemEntity, serverTmdbId: String?): Related {

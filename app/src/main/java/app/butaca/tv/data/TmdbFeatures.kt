@@ -58,7 +58,7 @@ suspend fun Repo.homeRows(force: Boolean = false): List<RelatedRow> {
     val rows = ArrayList<RelatedRow>()
     val used = HashSet<String>()
     fun add(title: String, list: List<ItemEntity>, min: Int = 3) {
-        val fresh = list.filter { it.stableKey !in watchedKeys && it.stableKey !in used }.take(18)
+        val fresh = list.noRepeats().filter { it.stableKey !in watchedKeys && it.stableKey !in used }.take(18)
         if (fresh.size >= min) { rows += RelatedRow(title, fresh); fresh.forEach { used += it.stableKey } }
     }
 
@@ -78,19 +78,19 @@ suspend fun Repo.homeRows(force: Boolean = false): List<RelatedRow> {
 
     add("Tendencias esta semana", matchTitles(tmdb.trending(3), null))
 
-    // De temporada
-    val cal = Calendar.getInstance()
-    val month = cal.get(Calendar.MONTH)
-    val day = cal.get(Calendar.DAY_OF_MONTH)
-    when {
-        month == Calendar.DECEMBER || (month == Calendar.JANUARY && day <= 6) ->
-            add("Para estas fiestas", matchTitles(tmdb.discover(false, emptyList(), 4, mapOf("with_keywords" to "207317")), null))
-        month == Calendar.OCTOBER ->
-            add("Para pasar miedo", matchTitles(tmdb.discover(false, listOf(27), 4), null))
-        month == Calendar.FEBRUARY && day <= 14 ->
-            add("Para San Valentín", matchTitles(tmdb.discover(false, listOf(10749), 4), null))
-        month == Calendar.JULY || month == Calendar.AUGUST ->
-            add("Cine de verano", matchTitles(tmdb.discover(false, listOf(12, 35), 4), null))
+    // Para estas fechas: fiestas, eventos y estaciones (calendario propio + palabras clave de TMDB)
+    for (ev in activeEvents(Calendar.getInstance()).take(2)) {
+        try {
+            val kw = ev.keywords.mapNotNull { k -> tmdb.keywordId(k) }.distinct()
+            val extra = HashMap<String, String>()
+            if (kw.isNotEmpty()) extra["with_keywords"] = kw.joinToString("|")
+            val found = ArrayList<TmdbTitle>()
+            if (kw.isNotEmpty() || ev.genres.isNotEmpty()) {
+                found += tmdb.discover(false, ev.genres, 8, extra)
+                if (ev.tv) found += tmdb.discover(true, ev.tvGenres, 3, extra)
+            }
+            add(ev.title, matchTitles(found.sortedByDescending { it.popularity }, null), min = 4)
+        } catch (_: Exception) { }
     }
 
     add("Imprescindibles", matchTitles(tmdb.topRated(false, 4), null))
@@ -515,5 +515,91 @@ suspend fun Repo.explore(selected: List<Tag>): List<ItemEntity> {
         // Con temas o estudios, si además hay géneros, que también los cumplan
         if (genres.isEmpty()) found else found.filter { it.genre == null || it.tmdbId == null || hasGenres(it) }
     }
-    return merged.distinctBy { it.stableKey }
+    return merged.noRepeats()
+}
+
+/** Sin carátulas repetidas: misma clave o misma película de TMDB. */
+fun List<ItemEntity>.noRepeats(): List<ItemEntity> {
+    val keys = HashSet<String>()
+    val ids = HashSet<Int>()
+    return filter { keys.add(it.stableKey) && (it.tmdbId == null || ids.add(it.tmdbId)) }
+}
+
+
+// ---------------- Para estas fechas ----------------
+
+/** Un momento del año (o del mundo) con títulos que encajan. Fechas inclusive. */
+data class SeasonEvent(
+    val title: String,
+    val from: java.time.LocalDate,
+    val to: java.time.LocalDate,
+    val keywords: List<String> = emptyList(),   // palabras clave de TMDB (en inglés)
+    val genres: List<Int> = emptyList(),
+    val tvGenres: List<Int> = emptyList(),
+    val tv: Boolean = true,
+    val priority: Int = 5,                        // más alto = más específico
+)
+
+/** Domingo de Pascua (algoritmo de Gauss/Meeus para el calendario gregoriano). */
+private fun easter(y: Int): java.time.LocalDate {
+    val a = y % 19; val b = y / 100; val c = y % 100; val d = b / 4; val e = b % 4
+    val f = (b + 8) / 25; val g = (b - f + 1) / 3; val h = (19 * a + b - d - g + 15) % 30
+    val i = c / 4; val k = c % 4; val l = (32 + 2 * e + 2 * i - h - k) % 7
+    val m = (a + 11 * h + 22 * l) / 451
+    val month = (h + l - 7 * m + 114) / 31; val day = ((h + l - 7 * m + 114) % 31) + 1
+    return java.time.LocalDate.of(y, month, day)
+}
+
+private fun firstSunday(y: Int, month: Int): java.time.LocalDate =
+    java.time.LocalDate.of(y, month, 1).with(java.time.temporal.TemporalAdjusters.firstInMonth(java.time.DayOfWeek.SUNDAY))
+
+/** Eventos del mundo con fecha conocida (eclipses visibles en España, grandes torneos…). */
+private val WORLD_EVENTS = listOf(
+    SeasonEvent("Eclipse total de sol en España", java.time.LocalDate.of(2027, 7, 20), java.time.LocalDate.of(2027, 8, 3),
+        listOf("solar eclipse", "eclipse", "astronomy", "astronaut"), priority = 9),
+    SeasonEvent("Eclipse anular de sol", java.time.LocalDate.of(2028, 1, 16), java.time.LocalDate.of(2028, 1, 27),
+        listOf("solar eclipse", "eclipse", "astronomy"), priority = 9),
+    SeasonEvent("Eclipse total de luna", java.time.LocalDate.of(2028, 12, 24), java.time.LocalDate.of(2029, 1, 1),
+        listOf("moon", "eclipse", "astronomy"), priority = 8),
+    SeasonEvent("Mundial femenino de fútbol", java.time.LocalDate.of(2027, 6, 20), java.time.LocalDate.of(2027, 7, 25),
+        listOf("soccer", "football (soccer)", "women's sports"), priority = 7),
+    SeasonEvent("Eurocopa 2028", java.time.LocalDate.of(2028, 6, 5), java.time.LocalDate.of(2028, 7, 9),
+        listOf("soccer", "football (soccer)"), priority = 7),
+    SeasonEvent("Juegos Olímpicos de Los Ángeles", java.time.LocalDate.of(2028, 7, 10), java.time.LocalDate.of(2028, 7, 30),
+        listOf("olympic games", "athlete", "sports"), priority = 8),
+)
+
+/** Lo que toca hoy, de más a menos específico. */
+fun activeEvents(cal: Calendar): List<SeasonEvent> {
+    val today = java.time.LocalDate.of(cal.get(Calendar.YEAR), cal.get(Calendar.MONTH) + 1, cal.get(Calendar.DAY_OF_MONTH))
+    val y = today.year
+    fun d(m: Int, day: Int, year: Int = y) = java.time.LocalDate.of(year, m, day)
+    val e = easter(y)
+    val list = ArrayList<SeasonEvent>()
+    // Fiestas
+    list += SeasonEvent("Para estas Navidades", d(11, 20), d(12, 31), listOf("christmas", "santa claus", "christmas eve"), priority = 9)
+    list += SeasonEvent("Para estas Navidades", d(1, 1), d(1, 6), listOf("christmas", "santa claus", "three kings"), priority = 9)
+    list += SeasonEvent("Para despedir el año", d(12, 26), d(12, 31), listOf("new year's eve", "new year"), priority = 10)
+    list += SeasonEvent("Para San Valentín", d(2, 6), d(2, 14), listOf("valentine's day", "romantic comedy"), genres = listOf(10749), priority = 9)
+    list += SeasonEvent("Carnaval", e.minusDays(52), e.minusDays(46), listOf("carnival", "costume party", "masquerade"), priority = 8)
+    list += SeasonEvent("Para Semana Santa", e.minusDays(9), e.plusDays(1), listOf("jesus christ", "bible", "biblical epic", "ancient rome"), priority = 9)
+    list += SeasonEvent("Día del Padre", d(3, 12), d(3, 19), listOf("father son relationship", "father daughter relationship"), priority = 8)
+    list += SeasonEvent("Día del Libro: historias que empezaron en papel", d(4, 16), d(4, 23), listOf("based on novel or book"), priority = 6)
+    list += SeasonEvent("Que la Fuerza te acompañe", d(5, 1), d(5, 4), listOf("space opera", "galaxy", "jedi"), priority = 7)
+    firstSunday(y, 5).let { m -> list += SeasonEvent("Día de la Madre", m.minusDays(7), m, listOf("mother daughter relationship", "mother son relationship"), priority = 8) }
+    list += SeasonEvent("Llegada a la Luna: aniversario", d(7, 14), d(7, 21), listOf("moon landing", "moon", "astronaut", "nasa"), priority = 7)
+    list += SeasonEvent("Noche de las Perseidas", d(8, 9), d(8, 14), listOf("meteor", "astronomy", "outer space"), priority = 6)
+    list += SeasonEvent("Vuelta al cole", d(9, 1), d(9, 15), listOf("school", "high school", "teacher"), priority = 6)
+    list += SeasonEvent("Para pasar miedo en Halloween", d(10, 15), d(11, 1), listOf("halloween", "haunted house", "witch"), genres = listOf(27), tvGenres = listOf(9648), priority = 9)
+    list += SeasonEvent("Día de Muertos", d(10, 28), d(11, 2), listOf("day of the dead", "afterlife", "ghost"), priority = 8)
+    // Estaciones (siempre hay alguna)
+    list += SeasonEvent("Para tardes de invierno", d(1, 7), d(3, 19), listOf("snow", "winter", "cabin"), priority = 2)
+    list += SeasonEvent("Para tardes de invierno", d(12, 21), d(12, 31), listOf("snow", "winter"), priority = 1)
+    list += SeasonEvent("Llega la primavera: aventuras al aire libre", d(3, 20), d(6, 20), listOf("road trip", "nature", "journey"), priority = 2)
+    list += SeasonEvent("Cine de verano", d(6, 21), d(9, 21), listOf("summer", "beach", "summer vacation"), priority = 2)
+    list += SeasonEvent("Para tardes de otoño", d(9, 22), d(12, 20), listOf("mystery", "detective", "whodunit"), genres = emptyList(), priority = 2)
+    list += WORLD_EVENTS
+    return list.filter { !today.isBefore(it.from) && !today.isAfter(it.to) }
+        .sortedByDescending { it.priority }
+        .distinctBy { it.title }
 }
